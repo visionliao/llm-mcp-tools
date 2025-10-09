@@ -38,8 +38,8 @@ export default function Home() {
   }, [selectedModel]);
 
   const handleSendMessage = async () => {
-    if (!serverUrl.trim() || !message.trim()) {
-      alert("请输入服务器地址和消息");
+    if (!message.trim()) {
+      alert("请输入消息");
       return;
     }
 
@@ -139,9 +139,9 @@ export default function Home() {
 
           <button
             onClick={handleSendMessage}
-            disabled={isLoading || !serverUrl.trim() || !message.trim() || modelOptions.length === 0}
+            disabled={isLoading || !message.trim() || modelOptions.length === 0}
             className={`w-full py-2 px-4 rounded-md font-medium text-white transition-colors ${
-              isLoading || !serverUrl.trim() || !message.trim() || modelOptions.length === 0
+              isLoading || !message.trim() || modelOptions.length === 0
                 ? "bg-gray-400 cursor-not-allowed"
                 : "bg-blue-600 hover:bg-blue-700"
             }`}
@@ -151,14 +151,10 @@ export default function Home() {
         </div>
 
         <div className="bg-white rounded-lg shadow-md p-6">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">使用说明</h2>
-          <ul className="text-sm text-gray-600 space-y-2">
-            <li>• 在第一个输入框中输入 MCP 服务器的地址</li>
-            <li>• 从下拉列表中选择要使用的大模型</li>
-            <li>• 在消息框中输入要发送的消息</li>
-            <li>• 点击&ldquo;发送消息&rdquo;按钮或按 Enter 键发送</li>
-            <li>• 目前仅实现了 UI 界面，后续会添加与 MCP 服务器的实际通信功能</li>
-          </ul>
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">大模型回复</h2>
+          <div className="bg-gray-50 rounded-md p-4 min-h-[200px] max-h-[400px] overflow-y-auto">
+            <p className="text-gray-400">大模型的回复将在这里显示...</p>
+          </div>
         </div>
       </div>
     </div>
