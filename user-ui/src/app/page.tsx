@@ -19,7 +19,7 @@ export default function Home() {
     // 在组件挂载时获取可用的模型选项
     const loadModelOptions = async () => {
       try {
-        const response = await fetch('/api/models?type=options');
+        const response = await fetch('/api/model-list?type=options');
         if (response.ok) {
           const options = await response.json();
           setModelOptions(options);
@@ -45,7 +45,7 @@ export default function Home() {
 
     setIsLoading(true);
     try {
-      const response = await fetch(`/api/models?type=parse&value=${encodeURIComponent(selectedModel)}`);
+      const response = await fetch(`/api/model-list?type=parse&value=${encodeURIComponent(selectedModel)}`);
       if (response.ok) {
         const modelInfo = await response.json();
         console.log("发送消息到服务器:", serverUrl);
