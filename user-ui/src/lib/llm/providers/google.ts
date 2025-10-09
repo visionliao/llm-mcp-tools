@@ -26,7 +26,6 @@ export class GoogleChatProvider extends BaseChatProvider {
     // 使用从基类继承的配置初始化 SDK
     const genAI = new GoogleGenerativeAI(this.config.apiKey);
     const generativeModel = genAI.getGenerativeModel({ model });
-
     // 格式化消息
     const formattedMessages = this.mapMessagesToGoogleFormat(messages);
 
@@ -38,12 +37,15 @@ export class GoogleChatProvider extends BaseChatProvider {
       // 将 Google SDK 的流转换为标准的 Web ReadableStream
       const stream = new ReadableStream<string>({
         async start(controller) {
+          console.log("--- [Backend] Stream from Google Started ---"); // <-- 添加开始日志
           for await (const chunk of result.stream) {
             const text = chunk.text();
+            console.log(`[Backend Chunk]: "${text}"`);
             if (text) {
               controller.enqueue(text); // 将每个文本块放入流中
             }
           }
+          console.log("--- [Backend] Stream from Google Ended ---"); // <-- 添加结束日志
           controller.close(); // 所有块发送完毕，关闭流
         },
       });

@@ -19,13 +19,16 @@ export default function Home() {
   const [selectedModel, setSelectedModel] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [modelOptions, setModelOptions] = useState<ModelOption[]>([]);
+  // 主对话历史
   const [conversation, setConversation] = useState<ChatMessage[]>([]);
+  // 专门用于接收当前流式响应的 state
+  const [streamingResponse, setStreamingResponse] = useState("");
   const chatContainerRef = useRef<HTMLDivElement>(null);
 
   // 自动滚动到聊天记录底部
   useEffect(() => {
     chatContainerRef.current?.scrollTo({ top: chatContainerRef.current.scrollHeight, behavior: 'smooth' });
-  }, [conversation]);
+  }, [conversation, streamingResponse]);
 
   // 组件加载时获取可用模型
   useEffect(() => {
@@ -36,9 +39,9 @@ export default function Home() {
         const options = await response.json();
         setModelOptions(options);
         
-        // 如果有模型，默认选择第一个
+        // 如果有模型，默认选择gemini-2.5-flash
         if (options.length > 0) {
-          setSelectedModel(options[0].value);
+          setSelectedModel(options[2].value);
         }
       } catch (error) {
         console.error('获取模型选项失败:', error);
@@ -59,8 +62,7 @@ export default function Home() {
     const newConversation = [...conversation, userMessage];
     setConversation(newConversation);
     setMessage("");
-    // 立即添加一个空的 assistant 消息用于接收流式响应
-    setConversation(prev => [...prev, { role: 'assistant', content: '' }]);
+    setStreamingResponse(""); // 清空上一次的流式响应
     try {
       const response = await fetch('/api/chat', {
         method: 'POST',
@@ -79,29 +81,26 @@ export default function Home() {
       // 处理流式响应
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
-      let done = false;
+      let completeResponse = "";
 
-      while (!done) {
-        const { value, done: readerDone } = await reader.read();
-        done = readerDone;
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
         const chunk = decoder.decode(value, { stream: true });
-        
-        // 更新最后一条 assistant 消息的内容
-        setConversation(prev => {
-          const lastMessage = prev[prev.length - 1];
-          lastMessage.content += chunk;
-          return [...prev.slice(0, -1), lastMessage];
-        });
+        completeResponse += chunk;
+        // 只更新独立的 streamingResponse state
+        setStreamingResponse(prev => prev + chunk);
       }
+      // 流结束后，将完整的回复一次性加入对话历史
+      setConversation(prev => [...prev, { role: 'assistant', content: completeResponse }]);
     } catch (error: any) {
       console.error("发送消息失败:", error);
-      setConversation(prev => {
-        const lastMessage = prev[prev.length - 1];
-        lastMessage.content = `错误: ${error.message}`;
-        return [...prev.slice(0, -1), lastMessage];
-      });
+      // 如果出错，也将错误信息加入对话历史
+      setConversation(prev => [...prev, { role: 'assistant', content: `错误: ${error.message}` }]);
     } finally {
       setIsLoading(false);
+      // 流结束后清空，准备下一次接收
+      setStreamingResponse(""); 
     }
   };
 
@@ -114,8 +113,8 @@ export default function Home() {
 
   return (
     <div className="flex flex-col h-screen bg-gray-50">
-      <header className="p-4 border-b">
-        <h1 className="text-xl font-bold text-center">MCP 客户端</h1>
+      <header className="p-4 border-b bg-white shadow-sm">
+        <h1 className="text-xl font-bold text-center text-gray-800">MCP 客户端</h1>
       </header>
       
       <main className="flex-grow p-4 overflow-hidden">
@@ -129,7 +128,7 @@ export default function Home() {
                 id="modelSelect"
                 value={selectedModel}
                 onChange={(e) => setSelectedModel(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
               >
                 {modelOptions.map((option) => (
                   <option key={option.value} value={option.value}>
@@ -139,22 +138,30 @@ export default function Home() {
               </select>
             ) : (
               <div className="w-full px-3 py-2 border border-gray-200 rounded-md bg-gray-100 text-gray-500">
-                没有可用的模型配置...
+                正在加载或没有可用的模型配置...
               </div>
             )}
           </div>
 
           <div ref={chatContainerRef} className="flex-grow bg-white rounded-lg shadow-inner p-4 overflow-y-auto mb-4 space-y-4">
+            {/* 渲染已完成的对话历史 */}
             {conversation.map((msg, index) => (
               <div key={index} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                <div className={`whitespace-pre-wrap max-w-xl px-4 py-2 rounded-lg ${msg.role === 'user' ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-800'}`}>
+                <div className={`whitespace-pre-wrap max-w-xl px-4 py-2 rounded-lg shadow-sm ${msg.role === 'user' ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-800'}`}>
                   {msg.content}
-                  {/* 在流式输出时显示一个光标 */}
-                  {isLoading && msg.role === 'assistant' && index === conversation.length - 1 && <span className="animate-pulse">▍</span>}
                 </div>
               </div>
             ))}
-             {conversation.length === 0 && <p className="text-gray-400 text-center">开始对话吧...</p>}
+            {/* 【新增】如果正在接收流式响应，则渲染这个临时消息块 */}
+            {streamingResponse && (
+              <div className="flex justify-start">
+                <div className="whitespace-pre-wrap max-w-xl px-4 py-2 rounded-lg shadow-sm bg-gray-200 text-gray-800">
+                  {streamingResponse}
+                  <span className="animate-pulse">▍</span>
+                </div>
+              </div>
+            )}
+            {conversation.length === 0 && !streamingResponse && <p className="text-gray-400 text-center">开始对话吧...</p>}
           </div>
 
           <div className="flex items-start space-x-4">
