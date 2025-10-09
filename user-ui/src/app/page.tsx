@@ -1,6 +1,12 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+
+// 定义与后端 lib/llm/types.ts 匹配的类型
+interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
 
 interface ModelOption {
   value: string;
@@ -9,25 +15,30 @@ interface ModelOption {
 }
 
 export default function Home() {
-  const [serverUrl, setServerUrl] = useState("");
   const [message, setMessage] = useState("");
   const [selectedModel, setSelectedModel] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [modelOptions, setModelOptions] = useState<ModelOption[]>([]);
+  const [conversation, setConversation] = useState<ChatMessage[]>([]);
+  const chatContainerRef = useRef<HTMLDivElement>(null);
 
+  // 自动滚动到聊天记录底部
   useEffect(() => {
-    // 在组件挂载时获取可用的模型选项
+    chatContainerRef.current?.scrollTo({ top: chatContainerRef.current.scrollHeight, behavior: 'smooth' });
+  }, [conversation]);
+
+  // 组件加载时获取可用模型
+  useEffect(() => {
     const loadModelOptions = async () => {
       try {
         const response = await fetch('/api/model-list?type=options');
-        if (response.ok) {
-          const options = await response.json();
-          setModelOptions(options);
-          
-          // 如果有可用的模型，默认选择第一个
-          if (options.length > 0 && !selectedModel) {
-            setSelectedModel(options[0].value);
-          }
+        if (!response.ok) throw new Error('Failed to fetch model options');
+        const options = await response.json();
+        setModelOptions(options);
+        
+        // 如果有模型，默认选择第一个
+        if (options.length > 0) {
+          setSelectedModel(options[0].value);
         }
       } catch (error) {
         console.error('获取模型选项失败:', error);
@@ -35,30 +46,60 @@ export default function Home() {
     };
     
     loadModelOptions();
-  }, [selectedModel]);
+  }, []);
 
   const handleSendMessage = async () => {
-    if (!message.trim()) {
-      alert("请输入消息");
+    if (!message.trim() || !selectedModel) {
+      alert("请输入消息并选择模型");
       return;
     }
 
     setIsLoading(true);
+    const userMessage: ChatMessage = { role: 'user', content: message };
+    const newConversation = [...conversation, userMessage];
+    setConversation(newConversation);
+    setMessage("");
+    // 立即添加一个空的 assistant 消息用于接收流式响应
+    setConversation(prev => [...prev, { role: 'assistant', content: '' }]);
     try {
-      const response = await fetch(`/api/model-list?type=parse&value=${encodeURIComponent(selectedModel)}`);
-      if (response.ok) {
-        const modelInfo = await response.json();
-        console.log("发送消息到服务器:", serverUrl);
-        console.log("消息内容:", message);
-        console.log("选择的模型:", modelInfo);
-        
-        // 清空消息输入框
-        setMessage("");
-      } else {
-        console.error("解析模型选择失败");
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          selectedModel,
+          messages: newConversation, // 发送包含最新用户消息的完整历史
+        }),
+      });
+
+      if (!response.ok || !response.body) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || '服务器响应错误');
       }
-    } catch (error) {
+
+      // 处理流式响应
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let done = false;
+
+      while (!done) {
+        const { value, done: readerDone } = await reader.read();
+        done = readerDone;
+        const chunk = decoder.decode(value, { stream: true });
+        
+        // 更新最后一条 assistant 消息的内容
+        setConversation(prev => {
+          const lastMessage = prev[prev.length - 1];
+          lastMessage.content += chunk;
+          return [...prev.slice(0, -1), lastMessage];
+        });
+      }
+    } catch (error: any) {
       console.error("发送消息失败:", error);
+      setConversation(prev => {
+        const lastMessage = prev[prev.length - 1];
+        lastMessage.content = `错误: ${error.message}`;
+        return [...prev.slice(0, -1), lastMessage];
+      });
     } finally {
       setIsLoading(false);
     }
@@ -72,34 +113,15 @@ export default function Home() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 py-8">
-      <div className="max-w-4xl mx-auto px-4">
-        <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">
-            MCP 客户端
-          </h1>
-          <p className="text-gray-600">
-            连接到 MCP 服务器并发送消息
-          </p>
-        </div>
-
-        <div className="bg-white rounded-lg shadow-md p-6 mb-6">
-          <div className="mb-6">
-            <label htmlFor="serverUrl" className="block text-sm font-medium text-gray-700 mb-2">
-              MCP 服务器地址
-            </label>
-            <input
-              type="text"
-              id="serverUrl"
-              value={serverUrl}
-              onChange={(e) => setServerUrl(e.target.value)}
-              placeholder="例如: http://localhost:3001"
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            />
-          </div>
-
-          <div className="mb-6">
-            <label htmlFor="modelSelect" className="block text-sm font-medium text-gray-700 mb-2">
+    <div className="flex flex-col h-screen bg-gray-50">
+      <header className="p-4 border-b">
+        <h1 className="text-xl font-bold text-center">MCP 客户端</h1>
+      </header>
+      
+      <main className="flex-grow p-4 overflow-hidden">
+        <div className="max-w-4xl mx-auto h-full flex flex-col">
+          <div className="mb-4">
+            <label htmlFor="modelSelect" className="block text-sm font-medium text-gray-700 mb-1">
               选择大模型
             </label>
             {modelOptions.length > 0 ? (
@@ -107,7 +129,7 @@ export default function Home() {
                 id="modelSelect"
                 value={selectedModel}
                 onChange={(e) => setSelectedModel(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 {modelOptions.map((option) => (
                   <option key={option.value} value={option.value}>
@@ -116,47 +138,46 @@ export default function Home() {
                 ))}
               </select>
             ) : (
-              <div className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-50 text-gray-500">
-                没有可用的模型配置，请检查 .env 文件中的 API_KEY 和 MODEL_LIST 配置
+              <div className="w-full px-3 py-2 border border-gray-200 rounded-md bg-gray-100 text-gray-500">
+                没有可用的模型配置...
               </div>
             )}
           </div>
 
-          <div className="mb-6">
-            <label htmlFor="message" className="block text-sm font-medium text-gray-700 mb-2">
-              消息
-            </label>
+          <div ref={chatContainerRef} className="flex-grow bg-white rounded-lg shadow-inner p-4 overflow-y-auto mb-4 space-y-4">
+            {conversation.map((msg, index) => (
+              <div key={index} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                <div className={`whitespace-pre-wrap max-w-xl px-4 py-2 rounded-lg ${msg.role === 'user' ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-800'}`}>
+                  {msg.content}
+                  {/* 在流式输出时显示一个光标 */}
+                  {isLoading && msg.role === 'assistant' && index === conversation.length - 1 && <span className="animate-pulse">▍</span>}
+                </div>
+              </div>
+            ))}
+             {conversation.length === 0 && <p className="text-gray-400 text-center">开始对话吧...</p>}
+          </div>
+
+          <div className="flex items-start space-x-4">
             <textarea
               id="message"
               value={message}
               onChange={(e) => setMessage(e.target.value)}
               onKeyDown={handleKeyPress}
-              placeholder="输入要发送的消息..."
-              rows={4}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+              placeholder="输入消息..."
+              rows={2}
+              className="flex-grow px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+              disabled={isLoading}
             />
-          </div>
-
-          <button
-            onClick={handleSendMessage}
-            disabled={isLoading || !message.trim() || modelOptions.length === 0}
-            className={`w-full py-2 px-4 rounded-md font-medium text-white transition-colors ${
-              isLoading || !message.trim() || modelOptions.length === 0
-                ? "bg-gray-400 cursor-not-allowed"
-                : "bg-blue-600 hover:bg-blue-700"
-            }`}
-          >
-            {isLoading ? "发送中..." : "发送消息"}
-          </button>
-        </div>
-
-        <div className="bg-white rounded-lg shadow-md p-6">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">大模型回复</h2>
-          <div className="bg-gray-50 rounded-md p-4 min-h-[200px] max-h-[400px] overflow-y-auto">
-            <p className="text-gray-400">大模型的回复将在这里显示...</p>
+            <button
+              onClick={handleSendMessage}
+              disabled={isLoading || !message.trim() || modelOptions.length === 0}
+              className="px-6 py-2 rounded-md font-medium text-white transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed bg-blue-600 hover:bg-blue-700"
+            >
+              {isLoading ? "思考中..." : "发送"}
+            </button>
           </div>
         </div>
-      </div>
+      </main>
     </div>
   );
 }
