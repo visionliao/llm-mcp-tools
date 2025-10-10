@@ -38,11 +38,21 @@ function initializeGlobalProxy() {
  * @returns 返回包含 provider 和 model 的对象
  */
 function parseModelSelection(selectedValue: string): { provider: string; model: string } {
-  const parts = selectedValue.split(':');
-  if (parts.length !== 2 || !parts[0] || !parts[1]) {
-    throw new TypeError('Invalid selectedModel format. Expected "provider:model".');
+  if (!selectedValue) {
+    throw new TypeError('Invalid selectedModel format. Value cannot be empty.');
   }
-  return { provider: parts[0], model: parts[1] };
+
+  // 解决ollama模型名称中带冒号导致解析模型名称异常的问题，如qwen3:0.6b
+  const firstColonIndex = selectedValue.indexOf(':');
+  // 检查：冒号必须存在，且不能是第一个或最后一个字符
+  if (firstColonIndex <= 0 || firstColonIndex === selectedValue.length - 1) {
+    throw new TypeError(`Invalid selectedModel format. Expected "provider:model", but received "${selectedValue}".`);
+  }
+
+  const provider = selectedValue.substring(0, firstColonIndex);
+  const model = selectedValue.substring(firstColonIndex + 1);
+
+  return { provider, model };
 }
 
 /**
