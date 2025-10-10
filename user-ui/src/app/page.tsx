@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { LlmGenerationOptions } from "@/lib/llm/types"; 
 
 // 定义与后端 lib/llm/types.ts 匹配的类型
 interface ChatMessage {
@@ -24,6 +25,12 @@ export default function Home() {
   // 专门用于接收当前流式响应的 state
   const [streamingResponse, setStreamingResponse] = useState("");
   const chatContainerRef = useRef<HTMLDivElement>(null);
+  // 公共参数添加 state
+  const [temperature, setTemperature] = useState(1.0);
+  const [topP, setTopP] = useState(1.0);
+  const [presencePenalty, setPresencePenalty] = useState(0);
+  const [frequencyPenalty, setFrequencyPenalty] = useState(0);
+  const [maxOutputTokens, setMaxOutputTokens] = useState(8192);
 
   // 自动滚动到聊天记录底部
   useEffect(() => {
@@ -63,6 +70,14 @@ export default function Home() {
     setConversation(newConversation);
     setMessage("");
     setStreamingResponse(""); // 清空上一次的流式响应
+
+    const generationOptions: LlmGenerationOptions = {
+      temperature,
+      topP,
+      presencePenalty,
+      frequencyPenalty,
+      maxOutputTokens,
+    };
     try {
       const response = await fetch('/api/chat', {
         method: 'POST',
@@ -70,6 +85,7 @@ export default function Home() {
         body: JSON.stringify({
           selectedModel,
           messages: newConversation, // 发送包含最新用户消息的完整历史
+          options: generationOptions, // 发送模型参数
         }),
       });
 
@@ -141,6 +157,35 @@ export default function Home() {
                 正在加载或没有可用的模型配置...
               </div>
             )}
+          </div>
+
+          {/* --- 在模型选择下方添加参数滑块 --- */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4 mb-4 p-4 border rounded-lg bg-white text-sm">
+            <div>
+              <label htmlFor="temperature" className="flex justify-between"><span>创意活跃度 (Temperature)</span> <span>{temperature.toFixed(1)}</span></label>
+              <input type="range" id="temperature" min="0" max="2" step="0.1" value={temperature} onChange={(e) => setTemperature(parseFloat(e.target.value))}
+                className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"/>
+            </div>
+            <div>
+              <label htmlFor="topP" className="flex justify-between"><span>思维开放度 (Top-P)</span> <span>{topP.toFixed(2)}</span></label>
+              <input type="range" id="topP" min="0" max="1" step="0.05" value={topP} onChange={(e) => setTopP(parseFloat(e.target.value))}
+                className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"/>
+            </div>
+            <div>
+              <label htmlFor="presencePenalty" className="flex justify-between"><span>表述发散度 (Presence Penalty)</span> <span>{presencePenalty.toFixed(1)}</span></label>
+              <input type="range" id="presencePenalty" min="-2" max="1.9" step="0.1" value={presencePenalty} onChange={(e) => setPresencePenalty(parseFloat(e.target.value))}
+                className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"/>
+            </div>
+            <div>
+              <label htmlFor="frequencyPenalty" className="flex justify-between"><span>词汇丰富度 (Frequency Penalty)</span> <span>{frequencyPenalty.toFixed(1)}</span></label>
+              <input type="range" id="frequencyPenalty" min="-2" max="1.9" step="0.1" value={frequencyPenalty} onChange={(e) => setFrequencyPenalty(parseFloat(e.target.value))}
+                className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"/>
+            </div>
+            <div className="md:col-span-2">
+              <label htmlFor="maxTokens" className="flex justify-between"><span>单次回复限制 (Max Tokens)</span> <span>{maxOutputTokens}</span></label>
+              <input type="range" id="maxTokens" min="256" max="32000" step="256" value={maxOutputTokens} onChange={(e) => setMaxOutputTokens(parseInt(e.target.value, 10))}
+                className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"/>
+            </div>
           </div>
 
           <div ref={chatContainerRef} className="flex-grow bg-white rounded-lg shadow-inner p-4 overflow-y-auto mb-4 space-y-4">

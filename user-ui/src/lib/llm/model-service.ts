@@ -1,5 +1,5 @@
 import { createChatProvider } from './model-factory';
-import { ChatMessage } from './types';
+import { ChatMessage, LlmGenerationOptions } from './types';
 import { ProxyAgent, setGlobalDispatcher } from 'undici';
 
 // 使用一个模块级别的变量确保代理设置只执行一次
@@ -54,7 +54,8 @@ function parseModelSelection(selectedValue: string): { provider: string; model: 
  */
 export async function handleChatStream(
   selectedModel: string,
-  messages: ChatMessage[]
+  messages: ChatMessage[],
+  options?: LlmGenerationOptions
 ): Promise<ReadableStream<string>> {
   // 在处理任何请求之前，首先确保代理已初始化
   initializeGlobalProxy();
@@ -63,7 +64,7 @@ export async function handleChatStream(
   const { provider, model } = parseModelSelection(selectedModel);
 
   // 2. 使用工厂创建对应的 Provider 实例
-  const chatProvider = await createChatProvider(provider);
+  const chatProvider = await createChatProvider(provider, options);
 
   // 3. 调用 Provider 的方法执行核心操作
   const stream = await chatProvider.chat(model, messages);
