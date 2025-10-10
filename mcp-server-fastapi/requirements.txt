@@ -3,4 +3,5 @@ uvicorn[standard]
 pydantic
 pandas
 lxml  # pandas 读取 xml 可能需要
+lxml-stubs
 restrictedpython

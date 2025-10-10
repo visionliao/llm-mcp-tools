@@ -1,88 +1,8 @@
 import pandas as pd
-from datetime import datetime, timedelta
-from lxml import etree
-from typing import Optional
+from datetime import datetime
+from services.data_loader import get_master_base_df
 
-# --- 1. 配置区域 (请根据你的实际情况修改这里) ---
-
-# 各户型的总房间数 (户型代码: 数量)
-ROOM_TYPE_COUNTS = {
-    '1BD': 150,
-    '1BP': 19,
-    '2BD': 15,
-    '3BR': 1,
-    'STD': 22,
-    'STE': 360,
-    'STP': 12
-}
-
-# 各户型的平均面积 (单位: 平方米) (户型代码: 面积)
-ROOM_TYPE_AREAS = {
-    '1BD': 73,
-    '1BP': 88,
-    '2BD': 108,
-    '3BR': 134,
-    'STD': 45,
-    'STE': 60,
-    'STP': 67
-}
-
-# 各户型代码到具体名称的映射
-ROOM_TYPE_NAMES = {
-    '1BD': "一房豪华式公寓",
-    '1BP': "一房行政豪华式公寓",
-    '2BD': "两房行政公寓",
-    '3BR': "三房公寓",
-    'STD': "豪华单间公寓",
-    'STE': "行政单间公寓",
-    'STP': "豪华行政单间"
-}
-
-FILE_PATH = 'master_base.xml'
-
-
-# --- 2. 数据解析函数 ---
-
-def parse_spreadsheetml(file_path: str) -> Optional[pd.DataFrame]:
-    """
-    使用 lxml 解析 SpreadsheetML 2003 XML 文件并返回一个 pandas DataFrame。
-    此函数与原代码保持一致。
-    """
-    try:
-        tree = etree.parse(file_path)
-        root = tree.getroot()
-        ns = {'ss': 'urn:schemas-microsoft-com:office:spreadsheet'}
-        rows = root.findall('.//ss:Worksheet/ss:Table/ss:Row', namespaces=ns)
-
-        if not rows: return pd.DataFrame()
-
-        header_row = rows[0]
-        header = []
-        for cell in header_row.findall('ss:Cell', namespaces=ns):
-            data_element = cell.find('ss:Data', namespaces=ns)
-            col_name = data_element.text.strip() if data_element is not None and data_element.text is not None else ""
-            header.append(col_name)
-
-        data = []
-        for row in rows[1:]:
-            row_data = [
-                (cell.find('ss:Data', namespaces=ns).text if cell.find('ss:Data',
-                                                                       namespaces=ns) is not None and cell.find(
-                    'ss:Data', namespaces=ns).text is not None else '')
-                for cell in row.findall('ss:Cell', namespaces=ns)
-            ]
-            if len(row_data) < len(header):
-                row_data.extend([''] * (len(header) - len(row_data)))
-            data.append(row_data)
-
-        return pd.DataFrame(data, columns=header)
-    except Exception as e:
-        print(f"解析XML文件时发生错误: {e}")
-        return None
-
-
-# --- 3. 核心分析函数 (返回结果列表) ---
-def analyze_room_type_performance(file_path: str, start_date_str: str, end_date_str: str, room_counts: dict, room_areas: dict):
+def analyze_room_type_performance(start_date_str: str, end_date_str: str, room_counts: dict, room_areas: dict):
     """
     计算指定时间范围内的各户型经营表现。
     - 将输入从一个时间点改为一个时间段 (start_date_str, end_date_str)。
@@ -100,7 +20,7 @@ def analyze_room_type_performance(file_path: str, start_date_str: str, end_date_
 
     num_days_in_period = (end_date - start_date).days + 1
 
-    df_or_error = parse_spreadsheetml(file_path)
+    df_or_error = get_master_base_df()
     if isinstance(df_or_error, str):
         return df_or_error
     df = df_or_error
@@ -313,33 +233,3 @@ def format_analysis_to_string(analysis_results: list, start_date_str: str, end_d
     report_lines.append("========================================================")
 
     return "\n".join(report_lines)
-
-
-# --- 主程序入口 ---
-if __name__ == "__main__":
-    print("--- 户型经营表现分析工具 ---")
-    #start_date_input = input("请输入分析的开始日期 (YYYY-MM-DD): ")
-    #end_date_input = input("请输入分析的结束日期 (YYYY-MM-DD): ")
-
-    start_date_input = "2025-08-01"
-    end_date_input = "2025-08-31"
-
-    # 1. 调用计算函数，获取原始数据结果
-    results_list = analyze_room_type_performance(
-        FILE_PATH,
-        start_date_input,
-        end_date_input,
-        ROOM_TYPE_COUNTS,
-        ROOM_TYPE_AREAS
-    )
-
-    # 2. 调用格式化函数，将结果存入字符串变量
-    final_report_string = format_analysis_to_string(
-        results_list,
-        start_date_input,
-        end_date_input,
-        ROOM_TYPE_NAMES
-    )
-
-    # 3. 打印字符串变量
-    print(final_report_string)

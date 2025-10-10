@@ -1,50 +1,19 @@
 import pandas as pd
 from datetime import datetime
-from lxml import etree
 import re
+from typing import Union
 
-# --- 配置区域 ---
-FILE_PATH = 'master_base.xml'
-# 各户型代码到具体名称的映射
-ROOM_TYPE_NAMES = {
-    '1BD': "一房豪华式公寓",
-    '1BP': "一房行政豪华式公寓",
-    '2BD': "两房行政公寓",
-    '3BR': "三房公寓",
-    'STD': "豪华单间公寓",
-    'STE': "行政单间公寓",
-    'STP': "豪华行政单间"
-}
-
-
-# --- 数据解析函数 (与之前相同) ---
-def parse_spreadsheetml(file_path: str):
-    # ... (此函数代码与之前完全相同，此处省略)
-    try:
-        tree = etree.parse(file_path)
-        root = tree.getroot()
-        ns = {'ss': 'urn:schemas-microsoft-com:office:spreadsheet'}
-        rows = root.findall('.//ss:Worksheet/ss:Table/ss:Row', namespaces=ns)
-        if not rows: return pd.DataFrame()
-        header_row = rows[0]
-        header = [cell.find('ss:Data', namespaces=ns).text.strip() if cell.find('ss:Data',
-                                                                                namespaces=ns) is not None and cell.find(
-            'ss:Data', namespaces=ns).text is not None else "" for cell in header_row.findall('ss:Cell', namespaces=ns)]
-        data = []
-        for row in rows[1:]:
-            row_data = [(cell.find('ss:Data', namespaces=ns).text if cell.find('ss:Data',
-                                                                               namespaces=ns) is not None and cell.find(
-                'ss:Data', namespaces=ns).text is not None else '') for cell in row.findall('ss:Cell', namespaces=ns)]
-            if len(row_data) < len(header): row_data.extend([''] * (len(header) - len(row_data)))
-            data.append(row_data)
-        return pd.DataFrame(data, columns=header)
-    except Exception as e:
-        return f"解析XML文件时发生错误: {e}"
-
-
-# --- 核心查询函数 (与之前相同) ---
-def query_checkin_records(file_path: str, start_date_str: str, end_date_str: str, status_filter: str = 'ALL'):
-    # ... (此函数代码与之前完全相同，此处省略)
+# --- 核心查询函数 ---
+def query_checkin_records(
+    df: pd.DataFrame, 
+    start_date_str: str, 
+    end_date_str: str, 
+    status_filter: str = 'ALL'
+) -> Union[pd.DataFrame, str]:
+    """
+    在一个给定的DataFrame中，根据日期范围和状态筛选入住记录。
+    这是一个纯函数，不执行任何I/O操作。
+    """
     try:
         start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
         end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date()
@@ -52,27 +21,33 @@ def query_checkin_records(file_path: str, start_date_str: str, end_date_str: str
         return "错误: 日期格式不正确，请使用 'YYYY-MM-DD' 格式。"
     if start_date > end_date:
         return "错误: 开始日期不能晚于结束日期。"
-    df_or_error = parse_spreadsheetml(file_path)
-    if isinstance(df_or_error, str): return df_or_error
-    df = df_or_error
-    if df.empty: return "未能从文件中加载任何数据。"
+
+    if df.empty: 
+        return "未能加载任何数据。"
+
     required_cols = ['id', 'sta', 'rmno', 'rmtype', 'arr', 'dep', 'full_rate_long', 'is_long', 'create_datetime',
                      'remark', 'co_msg']
     if not all(col in df.columns for col in required_cols):
         return f"错误: 文件中缺少必要的列。需要: {required_cols}"
+
+    # 为避免SettingWithCopyWarning，对数据进行一次性的预处理和拷贝
+    df_processed = df.copy()
     for col in ['id', 'arr', 'dep', 'full_rate_long', 'create_datetime']:
-        df[col] = pd.to_numeric(df[col], errors='coerce')
-    df.dropna(subset=['arr', 'rmno', 'create_datetime'], inplace=True)
-    df['arr_date'] = pd.to_datetime(df['arr'], unit='D', origin='1899-12-30').dt.date # type: ignore
-    df['dep_date'] = pd.to_datetime(df['dep'], unit='D', origin='1899-12-30').dt.date # type: ignore
-    df['create_dt'] = pd.to_datetime(df['create_datetime'], unit='D', origin='1899-12-30')
-    checkin_records_df = df[(df['arr_date'] >= start_date) & (df['arr_date'] <= end_date)].copy()
+        df_processed[col] = pd.to_numeric(df_processed[col], errors='coerce')
+    
+    df_processed.dropna(subset=['arr', 'rmno', 'create_datetime'], inplace=True)
+    
+    df_processed['arr_date'] = pd.to_datetime(df_processed['arr'], unit='D', origin='1899-12-30').dt.date
+    df_processed['dep_date'] = pd.to_datetime(df_processed['dep'], unit='D', origin='1899-12-30').dt.date
+    df_processed['create_dt'] = pd.to_datetime(df_processed['create_datetime'], unit='D', origin='1899-12-30')
+
+    checkin_records_df = df_processed[(df_processed['arr_date'] >= start_date) & (df_processed['arr_date'] <= end_date)].copy()
     if status_filter != 'ALL':
         checkin_records_df = checkin_records_df[checkin_records_df['sta'] == status_filter]
+        
     if not checkin_records_df.empty:
         checkin_records_df['rent_priority'] = (checkin_records_df['full_rate_long'] > 0).astype(int)
-        sorted_records = checkin_records_df.sort_values(by=['rmno', 'rent_priority', 'create_dt'],
-                                                        ascending=[True, False, False])
+        sorted_records = checkin_records_df.sort_values(by=['rmno', 'rent_priority', 'create_dt'], ascending=[True, False, False])
         unique_checkin_records = sorted_records.drop_duplicates(subset='rmno', keep='first')
         return unique_checkin_records
     else:
@@ -97,7 +72,7 @@ def sanitize_for_display(text):
 
     return sanitized_text
 
-# --- 格式化输出函数 (已更新) ---
+# --- 格式化输出函数---
 def format_records_to_string(records_df, start_date_str, end_date_str, room_names, status_filter):
     if isinstance(records_df, str): return records_df
 
@@ -118,7 +93,7 @@ def format_records_to_string(records_df, start_date_str, end_date_str, room_name
     records_df['remark'] = records_df['remark'].fillna('')
     records_df['co_msg'] = records_df['co_msg'].fillna('')
 
-    # (关键修改点) 清理自由文本字段，防止非法字符破坏表格布局
+    # 清理自由文本字段，防止非法字符破坏表格布局
     records_df['remark'] = records_df['remark'].apply(sanitize_for_display)
     records_df['co_msg'] = records_df['co_msg'].apply(sanitize_for_display)
 
@@ -151,34 +126,3 @@ def format_records_to_string(records_df, start_date_str, end_date_str, room_name
 
     report_lines.append("\n" + "-" * 80)
     return "\n".join(report_lines)
-
-
-# --- 主程序入口 (与之前相同) ---
-if __name__ == "__main__":
-    print("--- 最近入住记录查询工具 ---")
-    start_input = "2025-01-01"
-    end_input = "2025-08-28"
-
-    print("\n请选择要查询的记录状态:")
-    print(" 1: I (在住)\n 2: O (结帐)\n 3: X (取消)\n 4: R (预订)\n 5: ALL (所有状态，默认)")
-    status_choice = "1"
-
-    status_map = {'1': 'I', '2': 'O', '3': 'X', '4': 'R', '5': 'ALL'}
-    selected_status = status_map.get(status_choice, 'ALL')
-
-    found_records = query_checkin_records(FILE_PATH, start_input, end_input, status_filter=selected_status)
-
-    final_report_string = format_records_to_string(found_records, start_input, end_input, ROOM_TYPE_NAMES,
-                                                   status_filter=selected_status)
-
-    print("\n" + "=" * 80)
-    print(final_report_string)
-    print("=" * 80)
-
-    '''if isinstance(found_records, pd.DataFrame) and not found_records.empty:
-        try:
-            with open("checkin_report_table.txt", "w", encoding="utf-8") as f:
-                f.write(final_report_string)
-            print("\n查询报告已保存至 checkin_report_table.txt")
-        except Exception as e:
-            print(f"\n写入报告文件时出错: {e}")'''

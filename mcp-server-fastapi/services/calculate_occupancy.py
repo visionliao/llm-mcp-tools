@@ -1,48 +1,8 @@
 import pandas as pd
-from datetime import datetime, timedelta
-from lxml import etree
+from datetime import datetime
+from services.data_loader import get_master_base_df
 
-
-def parse_spreadsheetml(file_path: str) -> pd.DataFrame:
-    """
-    使用 lxml 解析 SpreadsheetML 2003 XML 文件并返回一个 pandas DataFrame。
-    """
-    try:
-        tree = etree.parse(file_path)
-        root = tree.getroot()
-        ns = {'ss': 'urn:schemas-microsoft-com:office:spreadsheet'}
-        rows = root.findall('.//ss:Worksheet/ss:Table/ss:Row', namespaces=ns)
-
-        if not rows:
-            return pd.DataFrame()
-
-        header_row = rows[0]
-        header = []
-        for cell in header_row.findall('ss:Cell', namespaces=ns):
-            data_element = cell.find('ss:Data', namespaces=ns)
-            col_name = data_element.text.strip() if data_element is not None and data_element.text is not None else ""
-            header.append(col_name)
-
-        data = []
-        for row in rows[1:]:
-            row_data = []
-            cells = row.findall('ss:Cell', namespaces=ns)
-            for cell in cells:
-                cell_text_element = cell.find('ss:Data', namespaces=ns)
-                cell_value = cell_text_element.text if cell_text_element is not None and cell_text_element.text is not None else ''
-                row_data.append(cell_value)
-            if len(row_data) < len(header):
-                row_data.extend([''] * (len(header) - len(row_data)))
-            data.append(row_data)
-
-        df = pd.DataFrame(data, columns=header)
-        return df
-    except Exception as e:
-        print(f"解析XML文件时发生错误: {e}")
-        return None
-
-
-def calculate_occupancy_rate(file_path: str, start_date_str: str, end_date_str: str, total_rooms: int,
+def calculate_occupancy_rate(start_date_str: str, end_date_str: str, total_rooms: int,
                              show_details: bool = False):
     """
     计算指定时间范围内的酒店入住率和出租率，并可选择返回每日详情字符串。
@@ -56,12 +16,9 @@ def calculate_occupancy_rate(file_path: str, start_date_str: str, end_date_str: 
     if start_date > end_date:
         return None, "错误: 开始日期不能晚于结束日期。"
 
-    try:
-        df = parse_spreadsheetml(file_path)
-        if df is None or df.empty:
-            return None, "错误: 无法从XML文件中解析出数据。"
-    except FileNotFoundError:
-        return None, f"错误: 文件未找到 -> {file_path}"
+    df = get_master_base_df()
+    if df is None or df.empty:
+        return None, "错误: 无法从XML文件中解析出数据。"
 
     required_cols = ['sta', 'rmno', 'arr', 'dep']
     if not all(col in df.columns for col in required_cols):
@@ -156,9 +113,8 @@ def format_result_to_string(result_data: dict, details_log: str = "") -> str:
     return report_string
 
 
-# --- 主程序入口 ---
+# --- 主程序入口（用于快速调试） ---
 if __name__ == "__main__":
-    FILE_PATH = 'master_base.xml'
     TOTAL_ROOMS = 579
 
     print("--- 酒店入住率与出租率计算器 ---")  # M# <--- 修改: 更新标题
@@ -174,7 +130,7 @@ if __name__ == "__main__":
     show_details_flag = True if details_input == 'y' else False
 
     result_dict, details_string = calculate_occupancy_rate(
-        FILE_PATH, start_input, end_input, TOTAL_ROOMS, show_details=show_details_flag
+        start_input, end_input, TOTAL_ROOMS, show_details=show_details_flag
     )
 
     if result_dict is None:

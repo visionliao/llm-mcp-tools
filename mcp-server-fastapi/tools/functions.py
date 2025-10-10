@@ -4,11 +4,19 @@ import re
 
 from services.calculate_occupancy import calculate_occupancy_rate, format_result_to_string
 from services.room import analyze_room_type_performance, format_analysis_to_string
-from services.query_guest_data import load_data_from_xml, get_query_result_as_string
 from services.query_checkins import query_checkin_records, format_records_to_string
-from services.query_by_room import query_records_by_room, format_string
-from services.query_orders import parse_service_orders, search_by_rmno, format_results_string
-from services.advanced_query import parse_service_orders, search_orders_advanced, format_to_string
+from services.query_by_room import query_records_by_room, format_string as format_room_query_string
+from services.query_orders import search_by_rmno, format_results_string
+from services.advanced_query import search_orders_advanced, format_to_string
+from services.data_loader import get_lease_service_orders
+from services.data_loader import get_master_guest_df
+from services.query_guest_data import get_query_result_as_string
+from services.data_loader import get_master_base_df
+
+from services.constants import (
+    ROOM_TYPE_COUNTS, ROOM_TYPE_AREAS, ROOM_TYPE_NAMES,
+    SERVICE_CODE_MAP, LOCATION_CODE_MAP
+)
 
 
 # --- 1. 查询现在的系统时间 ---
@@ -82,7 +90,6 @@ def calculate_occupancy(start: str, end: str, details: str):
     '
     """
 
-    FILE_PATH = 'demo/master_base.xml'
     TOTAL_ROOMS = 579
 
     print("--- 入住率计算 ---")
@@ -95,7 +102,7 @@ def calculate_occupancy(start: str, end: str, details: str):
 
     # 函数现在返回两个值：一个字典（数据）和一个字符串（日志）
     result_dict, details_string = calculate_occupancy_rate(
-        FILE_PATH, start_input, end_input, TOTAL_ROOMS, show_details=show_details_flag
+        start_input, end_input, TOTAL_ROOMS, show_details=show_details_flag
     )
 
     # 检查是否有错误发生
@@ -222,41 +229,6 @@ def occupancy_details(start_time: str, end_time: str) -> str:
         ========================================================
         '
         """
-
-    # 各户型的总房间数 (户型代码: 数量)
-    ROOM_TYPE_COUNTS = {
-        '1BD': 150,
-        '1BP': 19,
-        '2BD': 15,
-        '3BR': 1,
-        'STD': 22,
-        'STE': 360,
-        'STP': 12
-    }
-
-    # 各户型的平均面积 (单位: 平方米) (户型代码: 面积)
-    ROOM_TYPE_AREAS = {
-        '1BD': 73,
-        '1BP': 88,
-        '2BD': 108,
-        '3BR': 134,
-        'STD': 45,
-        'STE': 60,
-        'STP': 67
-    }
-
-    # 各户型代码到具体名称的映射
-    ROOM_TYPE_NAMES = {
-        '1BD': "一房豪华式公寓",
-        '1BP': "一房行政豪华式公寓",
-        '2BD': "两房行政公寓",
-        '3BR': "三房公寓",
-        'STD': "豪华单间公寓",
-        'STE': "行政单间公寓",
-        'STP': "豪华行政单间"
-    }
-
-    FILE_PATH = 'demo/master_base.xml'
     print("--- 户型经营表现分析工具 ---")
 
     start_date_input = start_time
@@ -264,7 +236,6 @@ def occupancy_details(start_time: str, end_time: str) -> str:
 
     # 1. 调用计算函数，获取原始数据结果
     results_list = analyze_room_type_performance(
-        FILE_PATH,
         start_date_input,
         end_date_input,
         ROOM_TYPE_COUNTS,
@@ -326,49 +297,20 @@ def query_guest(id: str):
     '
     """
 
-    XML_FILE_PATH = 'demo/master_guest.xml'
-
-    # 1. 重要字段列表
-    IMPORTANT_FIELDS = [
-        'id', 'profile_id', 'name', 'sex_like', 'birth', 'language',  # 'sex' -> 'sex_like'
-        'mobile', 'email', 'nation', 'country', 'state', 'street',
-        'id_code', 'id_no', 'hotel_id', 'profile_type', 'times_in',
-        'create_user', 'create_datetime', 'modify_user', 'modify_datetime',
-    ]
-
-    # 2. 中文映射
-    FIELD_NAME_MAPPING = {
-        'id': '主键ID',
-        'profile_id': '客户档案ID',
-        'name': '姓名',
-        'sex_like': '推断性别',  # 修改
-        'birth': '出生日期',
-        'language': '语言代码',
-        'mobile': '手机',
-        'email': '电子邮件',
-        'nation': '国籍代码',
-        'country': '国家代码',
-        'state': '省份/州代码',
-        'street': '街道地址',
-        'id_code': '证件类型代码',
-        'id_no': '证件号码',
-        'hotel_id': '酒店ID',
-        'profile_type': '客户档案类型',
-        'times_in': '入住次数',
-        'create_user': '创建用户',
-        'create_datetime': '创建时间',
-        'modify_user': '修改用户',
-        'modify_datetime': '修改时间',
-    }
-    guest_df = load_data_from_xml(XML_FILE_PATH)
-    query_id = int(id)
-
-    if guest_df is not None:
-        query_id_example = query_id
-
-        result_variable = get_query_result_as_string(guest_df, query_id_example)
-
-        return result_variable
+    # 1. 从缓存中获取已处理好的DataFrame
+    guest_df = get_master_guest_df()
+    
+    if guest_df is None:
+        return "错误：客户数据服务当前不可用，请检查服务日志。"
+    
+    # 2. 验证输入ID并转换为整数
+    try:
+        query_id = int(id)
+    except (ValueError, TypeError):
+        return f"输入错误：ID '{id}' 不是一个有效的数字ID。"
+        
+    # 3. 调用纯业务逻辑函数，传入数据和查询ID
+    return get_query_result_as_string(guest_df, query_id)
 
 
 def query_checkins(start: str, end: str, choice: str):
@@ -400,32 +342,21 @@ def query_checkins(start: str, end: str, choice: str):
     --------------------------------------------------------------------------------
     '
     """
-    FILE_PATH = 'demo/master_base.xml'
-    # 各户型代码到具体名称的映射
-    ROOM_TYPE_NAMES = {
-        '1BD': "一房豪华式公寓",
-        '1BP': "一房行政豪华式公寓",
-        '2BD': "两房行政公寓",
-        '3BR': "三房公寓",
-        'STD': "豪华单间公寓",
-        'STE': "行政单间公寓",
-        'STP': "豪华行政单间"
-    }
-    start_input = start
-    end_input = end
+    # 1. 从缓存加载数据
+    master_df = get_master_base_df()
+    if master_df is None:
+        return "错误：核心入住数据服务当前不可用，请检查服务日志。"
 
-    print(" 1: I (在住) 2: O (结帐) 3: X (取消) 4: R (预订) 5: ALL (所有状态，默认)")
-    status_choice = choice
-
+    # 2. 准备参数
     status_map = {'1': 'I', '2': 'O', '3': 'X', '4': 'R', '5': 'ALL'}
-    selected_status = status_map.get(status_choice, 'ALL')
+    selected_status = status_map.get(choice, 'ALL')
 
-    found_records = query_checkin_records(FILE_PATH, start_input, end_input, status_filter=selected_status)
+    # 3. 调用纯业务逻辑函数
+    found_records = query_checkin_records(master_df, start, end, status_filter=selected_status)
 
-    final_report_string = format_records_to_string(found_records, start_input, end_input, ROOM_TYPE_NAMES,
-                                                   status_filter=selected_status)
-
-    return final_report_string
+    # 4. 调用格式化函数（它能处理错误字符串或DataFrame）
+    #    从中央常量文件传入 ROOM_TYPE_NAMES
+    return format_records_to_string(found_records, start, end, ROOM_TYPE_NAMES, status_filter=selected_status)
 
 
 def query_by_room(rooms: Union[str, List[str]]):
@@ -453,45 +384,31 @@ def query_by_room(rooms: Union[str, List[str]]):
     '
     状态对应为 I (在住)  O (结帐)  X (取消)  R (预订)
     """
-
-    FILE_PATH = 'demo/master_base.xml'
-    # 各户型代码到具体名称的映射
-    ROOM_TYPE_NAMES = {
-        '1BD': "一房豪华式公寓",
-        '1BP': "一房行政豪华式公寓",
-        '2BD': "两房行政公寓",
-        '3BR': "三房公寓",
-        'STD': "豪华单间公寓",
-        'STE': "行政单间公寓",
-        'STP': "豪华行政单间"
-    }
+    # 1. 解析输入参数 (这是工具层的职责)
     final_room_list: List[str] = []
-
-    # 优先处理列表形式，这是我们引导模型生成的标准形式
     if isinstance(rooms, list):
-        final_room_list = [str(item).strip() for item in rooms if str(item).strip()]
-
-    # 兼容模型可能返回单个字符串的边缘情况
+        final_room_list = [str(item).strip().upper() for item in rooms if str(item).strip()]
     elif isinstance(rooms, str):
-        # 假设字符串只包含一个房间号，或用逗号/空格分隔的多个房间号
-        final_room_list = [r.strip() for r in re.split(r'[\s,]+', rooms) if r.strip()]
+        final_room_list = [r.strip().upper() for r in re.split(r'[\s,]+', rooms) if r.strip()]
 
     if not final_room_list:
         return "输入错误：未能从输入中解析出有效的房间号。"
-    # --- 输入处理结束 ---
 
-    # 1. 调用查询函数 (使用处理后的干净列表)
-    found_records = query_records_by_room(FILE_PATH, final_room_list)
+    # 2. 从缓存加载数据
+    master_df = get_master_base_df()
+    if master_df is None:
+        return "错误：核心入住数据服务当前不可用，请检查服务日志。"
 
-    # 2. 调用格式化函数 (使用处理后的干净列表)
-    final_report_string = format_string(
+    # 3. 调用纯业务逻辑函数
+    found_records = query_records_by_room(master_df, final_room_list)
+
+    # 4. 调用格式化函数
+    #    从中央常量文件传入 ROOM_TYPE_NAMES
+    return format_room_query_string(
         found_records,
         final_room_list,
         ROOM_TYPE_NAMES
     )
-
-    # 3. 打印结果
-    return final_report_string
 
 
 def query_orders(room: str):
@@ -521,35 +438,16 @@ def query_orders(room: str):
           完成时间:   2025-07-14 18:47:44
         '
     """
+    # 1. 从缓存加载所有工单数据
+    all_orders = get_lease_service_orders() # 此函数已在data_loader中定义
+    if all_orders is None:
+        return "错误：工单数据服务当前不可用，请检查服务日志。"
 
-    XML_FILE_PATH = 'demo/lease_service_order.xml'
+    # 2. 调用纯业务逻辑函数进行筛选
+    found_orders = search_by_rmno(all_orders, room)
 
-    SERVICE_CODE_MAP = {
-        'A01': '更换布草', 'A02': '家具保洁', 'A03': '地面保洁', 'A04': '家电保洁',
-        'A05': '洁具保洁', 'A06': '客用品更换', 'A07': '杀虫', 'B1001': '电梯',
-        'B101': '冰箱', 'B102': '微波炉', 'B103': '烘干机', 'B104': '电视',
-        'B105': '洗衣机', 'B106': '空气净化器', 'B107': '抽湿机', 'B108': '油烟机',
-        'B110': '电风扇', 'B114': '取暖机', 'B117': '投影仪', 'B119': '屏幕',
-        'B120': '热水器', 'B121': '洗碗机', 'B122': '电磁炉', 'B123': '烤箱',
-        'B124': '排气扇', 'B201': '烟雾报警器', 'B202': '手动报警器',
-        'B203': '消防喷淋', 'B204': '消防应急灯', 'B301': '暖气片', 'B302': '通风管',
-        'B303': '空调', 'B401': '毛巾架', 'B402': '龙头', 'B403': '室内门把手/门锁',
-        'B404': '窗户', 'B405': '铰链', 'B501': '电源插座', 'B502': '开关',
-        'B503': '灯具', 'B504': '电灯泡', 'B505': '灭蝇灯', 'B506': '拖线板',
-        'B601': '家具', 'B602': '橱柜', 'B603': '天花板', 'B604': '地板',
-        'B605': '墙', 'B606': '百叶窗', 'B607': '脚板', 'B701': '排水',
-        'B702': '浴盆', 'B703': '镜子', 'B704': '瓷砖', 'B705': '水槽',
-        'B706': '花洒', 'B707': '马桶', 'B708': '台盆', 'B801': '其他',
-        'B901': '网络设备'
-    }
-    all_orders = parse_service_orders(XML_FILE_PATH)
-    if all_orders is None: return
-
-    room_number_input = room
-
-    found_orders = search_by_rmno(all_orders, room_number_input)
-    result_string = format_results_string(found_orders)
-    return result_string
+    # 3. 调用格式化函数
+    return format_results_string(found_orders)
 
 
 def advanced_query_service(
@@ -632,32 +530,9 @@ def advanced_query_service(
         完成时间:   2025-07-03 12:39:36
         '''
     """
-    XML_FILE_PATH = 'demo/lease_service_order.xml'
-    SERVICE_CODE_MAP = {
-        'A01': '更换布草', 'A02': '家具保洁', 'A03': '地面保洁', 'A04': '家电保洁',
-        'A05': '洁具保洁', 'A06': '客用品更换', 'A07': '杀虫', 'B1001': '电梯',
-        'B101': '冰箱', 'B102': '微波炉', 'B103': '烘干机', 'B104': '电视',
-        'B105': '洗衣机', 'B106': '空气净化器', 'B107': '抽湿机', 'B108': '油烟机',
-        'B110': '电风扇', 'B114': '取暖机', 'B117': '投影仪', 'B119': '屏幕',
-        'B120': '热水器', 'B121': '洗碗机', 'B122': '电磁炉', 'B123': '烤箱',
-        'B124': '排气扇', 'B201': '烟雾报警器', 'B202': '手动报警器',
-        'B203': '消防喷淋', 'B204': '消防应急灯', 'B301': '暖气片', 'B302': '通风管',
-        'B303': '空调', 'B401': '毛巾架', 'B402': '龙头', 'B403': '室内门把手/门锁',
-        'B404': '窗户', 'B405': '铰链', 'B501': '电源插座', 'B502': '开关',
-        'B503': '灯具', 'B504': '电灯泡', 'B505': '灭蝇灯', 'B506': '拖线板',
-        'B601': '家具', 'B602': '橱柜', 'B603': '天花板', 'B604': '地板',
-        'B605': '墙', 'B606': '百叶窗', 'B607': '脚板', 'B701': '排水',
-        'B702': '浴盆', 'B703': '镜子', 'B704': '瓷砖', 'B705': '水槽',
-        'B706': '花洒', 'B707': '马桶', 'B708': '台盆', 'B801': '其他',
-        'B901': '网络设备'
-    }
-    LOCATION_CODE_MAP = {
-        '002': '卧室', '004': '厨房', '008': '卫生间', '009': '客厅',
-        '001': '公寓外围', '003': '工区走道', '005': '后场区域', '006': '前场区域',
-        '011': '电梯厅-后', '010': '电梯厅-前', '007': '停车场', '012': '消防楼梯',
-    }
-
-    ALL_ORDERS_DATA = parse_service_orders(XML_FILE_PATH)
+    all_orders_data = get_lease_service_orders()
+    if all_orders_data is None:
+        return "错误: 无法加载工单数据，请检查服务日志。"
 
     # --- 处理和验证输入 ---
     try:
@@ -667,7 +542,7 @@ def advanced_query_service(
         return "输入错误：日期格式不正确，请使用 'YYYY-MM-DD' 格式。"
 
     # --- 执行查询并格式化结果 ---
-    found_orders = search_orders_advanced(ALL_ORDERS_DATA, start_date, end_date, service_code, location_code)
+    found_orders = search_orders_advanced(all_orders_data, start_date, end_date, service_code, location_code)
 
     service_desc = SERVICE_CODE_MAP.get(service_code, '不限') if service_code is not None else '不限'
     location_desc = LOCATION_CODE_MAP.get(location_code, '不限') if location_code is not None else '不限'
