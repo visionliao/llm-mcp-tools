@@ -45,6 +45,14 @@ export class GoogleChatProvider extends BaseChatProvider {
     // 格式化消息
     const formattedMessages = this.mapMessagesToGoogleFormat(messages);
 
+    console.log('\n--- [LLM Request Log - Streaming] ---');
+    console.log(`Timestamp: ${new Date().toISOString()}`);
+    console.log('Provider: Google');
+    console.log('Model:', model);
+    console.log('Final Generation Config:', JSON.stringify(generationConfig, null, 2));
+    console.log('Final Messages Payload:', JSON.stringify(formattedMessages, null, 2));
+    console.log('-------------------------------------\n');
+
     try {
       // 超时机制参数构造，每次对话请求时的配置
       const requestOptions: SingleRequestOptions = {
@@ -108,6 +116,13 @@ export class GoogleChatProvider extends BaseChatProvider {
     });
     
     const formattedMessages = this.mapMessagesToGoogleFormat(messages);
+    console.log('\n--- [LLM Request Log - NonStreaming] ---');
+    console.log(`Timestamp: ${new Date().toISOString()}`);
+    console.log('Provider: Google');
+    console.log('Model:', model);
+    console.log('Final Generation Config:', JSON.stringify(generationConfig, null, 2));
+    console.log('Final Messages Payload:', JSON.stringify(formattedMessages, null, 2));
+    console.log('-------------------------------------\n');
 
     try {
       const requestOptions: SingleRequestOptions = {

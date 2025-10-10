@@ -32,6 +32,8 @@ export default function Home() {
   const [presencePenalty, setPresencePenalty] = useState(0);
   const [frequencyPenalty, setFrequencyPenalty] = useState(0);
   const [maxOutputTokens, setMaxOutputTokens] = useState(8192);
+  // 控制历史记录长度
+  const [historyLength, setHistoryLength] = useState(4); // 默认保留最近4条消息
 
   // 自动滚动到聊天记录底部
   useEffect(() => {
@@ -67,10 +69,15 @@ export default function Home() {
 
     setIsLoading(true);
     const userMessage: ChatMessage = { role: 'user', content: message };
-    const newConversation = [...conversation, userMessage];
-    setConversation(newConversation);
+    // 从完整的对话历史中，只截取用户指定的最后几条，如果为0则将历史消息变为空
+    const messagesForApi = historyLength > 0 ? conversation.slice(-historyLength) : [];
+    // 将新消息和截取后的历史合并，作为最终发送的 payload
+    const messagesPayload = [...messagesForApi, userMessage];
+    // 更新UI时，依然使用完整的对话历史
+    setConversation(prev => [...prev, userMessage]);
+    // 清空输入框并重置流式响应状态
     setMessage("");
-    setStreamingResponse(""); // 清空上一次的流式响应
+    setStreamingResponse("");
 
     const generationOptions: LlmGenerationOptions = {
       stream: isStreamingEnabled,
@@ -86,7 +93,7 @@ export default function Home() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           selectedModel,
-          messages: newConversation, // 发送包含最新用户消息的完整历史
+          messages: messagesPayload, // 发送包含最新用户消息的完整历史
           options: generationOptions, // 发送模型参数
         }),
       });
@@ -173,6 +180,7 @@ export default function Home() {
 
           {/* --- 在模型选择下方添加参数滑块 --- */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4 mb-4 p-4 border rounded-lg bg-white text-sm">
+            {/* --- 第一行：创意活跃度 和 思维开放度 --- */}
             <div>
               <label htmlFor="temperature" className="flex justify-between"><span>创意活跃度 (Temperature)</span> <span>{temperature.toFixed(1)}</span></label>
               <input type="range" id="temperature" min="0" max="2" step="0.1" value={temperature} onChange={(e) => setTemperature(parseFloat(e.target.value))}
@@ -183,6 +191,7 @@ export default function Home() {
               <input type="range" id="topP" min="0" max="1" step="0.05" value={topP} onChange={(e) => setTopP(parseFloat(e.target.value))}
                 className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"/>
             </div>
+            {/* --- 第二行：表述发散度 和 词汇丰富度 --- */}
             <div>
               <label htmlFor="presencePenalty" className="flex justify-between"><span>表述发散度 (Presence Penalty)</span> <span>{presencePenalty.toFixed(1)}</span></label>
               <input type="range" id="presencePenalty" min="-2" max="1.9" step="0.1" value={presencePenalty} onChange={(e) => setPresencePenalty(parseFloat(e.target.value))}
@@ -193,23 +202,29 @@ export default function Home() {
               <input type="range" id="frequencyPenalty" min="-2" max="1.9" step="0.1" value={frequencyPenalty} onChange={(e) => setFrequencyPenalty(parseFloat(e.target.value))}
                 className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"/>
             </div>
-            <div className="md:col-span-2">
+            {/* --- 第三行： Max Tokens 和 历史记录条数 --- */}
+            <div>
               <label htmlFor="maxTokens" className="flex justify-between"><span>单次回复限制 (Max Tokens)</span> <span>{maxOutputTokens}</span></label>
               <input type="range" id="maxTokens" min="256" max="32000" step="256" value={maxOutputTokens} onChange={(e) => setMaxOutputTokens(parseInt(e.target.value, 10))}
                 className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"/>
             </div>
-          </div>
-          <div className="md:col-span-2 flex items-center justify-center">
-            <input
-              type="checkbox"
-              id="stream-toggle"
-              checked={isStreamingEnabled}
-              onChange={(e) => setIsStreamingEnabled(e.target.checked)}
-              className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500"
-            />
-            <label htmlFor="stream-toggle" className="ml-2 font-medium text-gray-900">
-              启用流式输出
-            </label>
+            <div>
+              <label htmlFor="historyLength" className="flex justify-between"><span>历史条数</span> <span>{historyLength}</span></label>
+              <input type="range" id="historyLength" min="0" max="100" step="1" value={historyLength} onChange={(e) => setHistoryLength(parseInt(e.target.value, 10))}
+                className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"/>
+            </div>
+            <div className="md:col-span-2 flex items-center justify-center">
+              <input
+                type="checkbox"
+                id="stream-toggle"
+                checked={isStreamingEnabled}
+                onChange={(e) => setIsStreamingEnabled(e.target.checked)}
+                className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500"
+              />
+              <label htmlFor="stream-toggle" className="ml-2 font-medium text-gray-900">
+                启用流式输出
+              </label>
+            </div>
           </div>
 
           <div ref={chatContainerRef} className="flex-grow bg-white rounded-lg shadow-inner p-4 overflow-y-auto mb-4 space-y-4">
