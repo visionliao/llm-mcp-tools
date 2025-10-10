@@ -34,6 +34,47 @@ export default function Home() {
   const [maxOutputTokens, setMaxOutputTokens] = useState(8192);
   // 控制历史记录长度
   const [historyLength, setHistoryLength] = useState(4); // 默认保留最近4条消息
+  // MCP 相关 state
+  const [mcpServerUrl, setMcpServerUrl] = useState("http://127.0.0.1:8000");
+  const [mcpStatus, setMcpStatus] = useState<'unchecked' | 'ok' | 'error' | 'testing'>('unchecked');
+
+  // 连接测试处理函数
+  const handleConnectivityTest = async () => {
+    if (!mcpServerUrl.trim()) {
+      alert("请输入 MCP 服务器地址");
+      return;
+    }
+    setMcpStatus('testing');
+    try {
+      const response = await fetch('/api/mcp-test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: mcpServerUrl }),
+      });
+      if (!response.ok) {
+        // 如果服务器返回了错误状态码（如 404, 500）
+        // 我们尝试解析错误信息，如果没有，就用状态码作为错误
+        const errorData = await response.json().catch(() => null); // 尝试解析json，失败则返回null
+        throw new Error(errorData?.error || `服务器返回错误: ${response.status}`);
+      }
+      const data = await response.json();
+      if (response.ok && data.status === 'ok') {
+        setMcpStatus('ok');
+        console.log("MCP Server Test successful:", data);
+      } else {
+        throw new Error(data.error || '连接测试失败');
+      }
+    } catch (error: any) {
+      console.error("MCP Server Test failed:", error.message);
+      setMcpStatus('error');
+      // Network errors often don't have a specific message, so we provide a clearer one.
+      if (error.message.includes('fetch failed')) {
+        alert(`连接失败: 无法访问地址 ${mcpServerUrl}。请检查地址是否正确，以及 MCP 服务是否正在运行。`);
+      } else {
+        alert(`连接失败: ${error.message}`);
+      }
+    }
+  };
 
   // 自动滚动到聊天记录底部
   useEffect(() => {
@@ -86,6 +127,7 @@ export default function Home() {
       presencePenalty,
       frequencyPenalty,
       maxOutputTokens,
+      mcpServerUrl: mcpServerUrl,
     };
     try {
       const response = await fetch('/api/chat', {
@@ -213,17 +255,38 @@ export default function Home() {
               <input type="range" id="historyLength" min="0" max="100" step="1" value={historyLength} onChange={(e) => setHistoryLength(parseInt(e.target.value, 10))}
                 className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"/>
             </div>
-            <div className="md:col-span-2 flex items-center justify-center">
+            <div className="md:col-span-2 flex items-center justify-between space-x-2">
               <input
-                type="checkbox"
-                id="stream-toggle"
-                checked={isStreamingEnabled}
+                type="checkbox" id="stream-toggle" checked={isStreamingEnabled}
                 onChange={(e) => setIsStreamingEnabled(e.target.checked)}
                 className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500"
               />
               <label htmlFor="stream-toggle" className="ml-2 font-medium text-gray-900">
                 启用流式输出
               </label>
+              {/* MCP 服务器输入框和测试按钮 */}
+              <input
+                type="text"
+                value={mcpServerUrl}
+                onChange={(e) => {
+                  setMcpServerUrl(e.target.value);
+                  setMcpStatus('unchecked'); // 地址变化后重置状态
+                }}
+                placeholder="MCP 服务器地址"
+                className="flex-grow px-2 py-1 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+              <button 
+                onClick={handleConnectivityTest} 
+                disabled={mcpStatus === 'testing'}
+                className={`px-3 py-1 rounded-md text-white text-xs transition-colors ${
+                  mcpStatus === 'testing' ? 'bg-gray-400' :
+                  mcpStatus === 'ok' ? 'bg-green-500 hover:bg-green-600' :
+                  mcpStatus === 'error' ? 'bg-red-500 hover:bg-red-600' :
+                  'bg-blue-500 hover:bg-blue-600'
+                }`}
+              >
+                {mcpStatus === 'testing' ? '测试中...' : '连接测试'}
+              </button>
             </div>
           </div>
 

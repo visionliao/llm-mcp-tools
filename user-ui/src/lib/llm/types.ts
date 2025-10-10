@@ -18,6 +18,7 @@ export interface LlmGenerationOptions {
   topP?: number;  // 思维开放度  top_p ，默认1.0，范围0-1.0,考虑多少种可能性，值越大，接受更多可能的回答；值越小，倾向选择最可能的回答。不推荐和创意活跃度一起更改
   presencePenalty?: number;  // 表述发散度,默认0，范围-2.0-2.0,值越大，越倾向不同的表达方式，避免概念重复；值越小，越倾向使用重复的概念或叙述，表达更具一致性
   frequencyPenalty?: number; // 词汇丰富度,默认0，范围-2.0-2.0,值越大，用词越丰富多样；值越低，用词更朴实简单
+  mcpServerUrl?: string; // mcp服务器地址
 }
 
 /**
