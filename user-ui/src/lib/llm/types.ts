@@ -11,6 +11,7 @@ export interface ChatMessage {
  * 所有属性都设为可选，以便调用者可以只提供他们想覆盖的参数。
  */
 export interface LlmGenerationOptions {
+  stream?: boolean;  // 启用流式输出
   timeoutMs?: number;  // 大模型回复超时时间，默认60s
   maxOutputTokens?: number; // 单次回复限制 ，默认8192，范围0-32000
   temperature?: number; // 创意活跃度 ，temperature  默认1.0，范围0-2.0

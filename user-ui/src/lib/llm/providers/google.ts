@@ -19,6 +19,7 @@ export class GoogleChatProvider extends BaseChatProvider {
       }));
   }
 
+  // 流式输出
   protected async _generateChatStream(
     model: string,
     messages: ChatMessage[],
@@ -34,7 +35,6 @@ export class GoogleChatProvider extends BaseChatProvider {
     // gemini-2.5-xxx 不支持这两个参数
     // if (this.config.presencePenalty !== undefined) generationConfig.presencePenalty = this.config.presencePenalty;
     // if (this.config.frequencyPenalty !== undefined) generationConfig.frequencyPenalty = this.config.frequencyPenalty;
-
 
     // 初始化模型，配置温度、topP、topK、maxOutputTokens等
     const generativeModel = genAI.getGenerativeModel({ 
@@ -74,6 +74,57 @@ export class GoogleChatProvider extends BaseChatProvider {
       });
 
       return stream;
+    } catch (error: any) {
+      if (error.name === 'AbortError' || (error.cause && error.cause.name === 'TimeoutError')) {
+        console.error("Google Gemini API request was aborted due to timeout.", { model });
+        // 从基类中获取超时信息，使错误消息更准确
+        const timeoutSeconds = (this.config.timeoutMs || 60000) / 1000;
+        throw new Error(`Request to Google Gemini timed out after ${timeoutSeconds} seconds.`);
+      }
+      console.error("Google Gemini API Error:", error.message);
+      throw new Error(`Failed to get response from Google Gemini: ${error.message}`);
+    }
+  }
+
+  // 非流式输出
+  protected async _generateChatNonStreaming(
+    model: string,
+    messages: ChatMessage[],
+    signal: AbortSignal
+  ): Promise<string> {
+    const genAI = new GoogleGenerativeAI(this.config.apiKey);
+    // 从 this.config 中提取并适配 Google SDK 的参数
+    const generationConfig: GenerationConfig = {};
+    if (this.config.maxOutputTokens !== undefined) generationConfig.maxOutputTokens = this.config.maxOutputTokens;
+    if (this.config.temperature !== undefined) generationConfig.temperature = this.config.temperature;
+    if (this.config.topP !== undefined) generationConfig.topP = this.config.topP;
+    // gemini-2.5-xxx 不支持这两个参数
+    // if (this.config.presencePenalty !== undefined) generationConfig.presencePenalty = this.config.presencePenalty;
+    // if (this.config.frequencyPenalty !== undefined) generationConfig.frequencyPenalty = this.config.frequencyPenalty;
+
+    const generativeModel = genAI.getGenerativeModel({ 
+      model,
+      generationConfig,
+    });
+    
+    const formattedMessages = this.mapMessagesToGoogleFormat(messages);
+
+    try {
+      const requestOptions: SingleRequestOptions = {
+        signal,
+        timeout: this.config.timeoutMs,
+      };
+
+      // 调用 SDK 的非流式 API: generateContent
+      const result = await generativeModel.generateContent(
+        { contents: formattedMessages },
+        requestOptions
+      );
+
+      const response = result.response;
+      const text = response.text();
+      console.log(`大模型响应非流式输出: "${text}"`);
+      return text;
     } catch (error: any) {
       if (error.name === 'AbortError' || (error.cause && error.cause.name === 'TimeoutError')) {
         console.error("Google Gemini API request was aborted due to timeout.", { model });

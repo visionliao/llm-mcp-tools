@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { handleChatStream } from '@/lib/llm/model-service';
+import { handleChat } from '@/lib/llm/model-service';
 import { ChatMessage, LlmGenerationOptions } from '@/lib/llm/types';
 
 /**
@@ -22,15 +22,18 @@ export async function POST(request: NextRequest) {
     }
 
     // 2. 调用服务层处理核心业务逻辑
-    const stream = await handleChatStream(selectedModel, messages, options);
+    const result = await handleChat(selectedModel, messages, options);
 
-    // 3. 将服务层返回的流直接作为 HTTP 响应返回给前端
-    return new NextResponse(stream, {
-      headers: {
-        'Content-Type': 'text/plain; charset=utf-8',
-      },
-    });
-
+    // 3. 将服务层返回的结果作为 HTTP 响应返回给前端
+    if (result instanceof ReadableStream) {
+      // 如果是流
+      return new NextResponse(result, {
+        headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+      });
+    } else {
+      // 如果是字符串，直接返回 JSON 响应
+      return NextResponse.json({ response: result });
+    }
   } catch (error: any) {
     console.error('Chat API error:', error);
     // 根据错误类型返回不同的状态码

@@ -18,7 +18,7 @@ export abstract class BaseChatProvider {
    * @param messages 对话历史记录
    * @returns 返回一个字符串的可读流 (ReadableStream)
    */
-  public async chat(model: string, messages: ChatMessage[]): Promise<ReadableStream<string>> {
+  public async chatStreaming(model: string, messages: ChatMessage[]): Promise<ReadableStream<string>> {
     if (messages.length === 0) {
       throw new Error("Message history cannot be empty.");
     }
@@ -63,4 +63,47 @@ export abstract class BaseChatProvider {
     messages: ChatMessage[],
     signal: AbortSignal
   ): Promise<ReadableStream<string>>;
+
+  /**
+   * 非流式聊天方法。
+   * 内置超时逻辑。
+   * @returns 返回一个包含完整回复内容的字符串
+   */
+  public async chatNonStreaming(model: string, messages: ChatMessage[]): Promise<string> {
+    if (messages.length === 0) {
+      throw new Error("Message history cannot be empty.");
+    }
+
+    const controller = new AbortController();
+    const timeoutMs = this.config.timeoutMs || 60000;
+    let timeoutId: NodeJS.Timeout | null = null;
+
+    try {
+      const chatPromise = this._generateChatNonStreaming(model, messages, controller.signal);
+
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => {
+          controller.abort();
+          reject(new Error(`Request timed out after ${timeoutMs / 1000} seconds.`));
+        }, timeoutMs);
+      });
+      
+      const result = await Promise.race([chatPromise, timeoutPromise]);
+      return result;
+
+    } finally {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+    }
+  }
+
+  /**
+   * 抽象方法，子类必须实现它以支持非流式调用。
+   */
+  protected abstract _generateChatNonStreaming(
+    model: string,
+    messages: ChatMessage[],
+    signal: AbortSignal
+  ): Promise<string>;
 }

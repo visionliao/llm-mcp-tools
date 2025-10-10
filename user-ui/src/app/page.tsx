@@ -26,6 +26,7 @@ export default function Home() {
   const [streamingResponse, setStreamingResponse] = useState("");
   const chatContainerRef = useRef<HTMLDivElement>(null);
   // 公共参数添加 state
+  const [isStreamingEnabled, setIsStreamingEnabled] = useState(true);
   const [temperature, setTemperature] = useState(1.0);
   const [topP, setTopP] = useState(1.0);
   const [presencePenalty, setPresencePenalty] = useState(0);
@@ -72,6 +73,7 @@ export default function Home() {
     setStreamingResponse(""); // 清空上一次的流式响应
 
     const generationOptions: LlmGenerationOptions = {
+      stream: isStreamingEnabled,
       temperature,
       topP,
       presencePenalty,
@@ -89,26 +91,36 @@ export default function Home() {
         }),
       });
 
-      if (!response.ok || !response.body) {
+      if (!response.ok) {
         const errorData = await response.json();
         throw new Error(errorData.error || '服务器响应错误');
       }
 
-      // 处理流式响应
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let completeResponse = "";
+      // VVV  根据开关状态，决定如何处理响应  VVV
+      if (isStreamingEnabled) {
+        // 处理流式响应
+        if (!response.body) throw new Error("Streaming response has no body");
 
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        const chunk = decoder.decode(value, { stream: true });
-        completeResponse += chunk;
-        // 只更新独立的 streamingResponse state
-        setStreamingResponse(prev => prev + chunk);
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let completeResponse = "";
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          const chunk = decoder.decode(value, { stream: true });
+          completeResponse += chunk;
+          // 只更新独立的 streamingResponse state
+          setStreamingResponse(prev => prev + chunk);
+        }
+        // 流结束后，将完整的回复一次性加入对话历史
+        setConversation(prev => [...prev, { role: 'assistant', content: completeResponse }]);
+      } else {
+        // 处理非流式响应
+        const data = await response.json();
+        const completeResponse = data.response;
+        setConversation(prev => [...prev, { role: 'assistant', content: completeResponse }]);
       }
-      // 流结束后，将完整的回复一次性加入对话历史
-      setConversation(prev => [...prev, { role: 'assistant', content: completeResponse }]);
     } catch (error: any) {
       console.error("发送消息失败:", error);
       // 如果出错，也将错误信息加入对话历史
@@ -186,6 +198,18 @@ export default function Home() {
               <input type="range" id="maxTokens" min="256" max="32000" step="256" value={maxOutputTokens} onChange={(e) => setMaxOutputTokens(parseInt(e.target.value, 10))}
                 className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"/>
             </div>
+          </div>
+          <div className="md:col-span-2 flex items-center justify-center">
+            <input
+              type="checkbox"
+              id="stream-toggle"
+              checked={isStreamingEnabled}
+              onChange={(e) => setIsStreamingEnabled(e.target.checked)}
+              className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500"
+            />
+            <label htmlFor="stream-toggle" className="ml-2 font-medium text-gray-900">
+              启用流式输出
+            </label>
           </div>
 
           <div ref={chatContainerRef} className="flex-grow bg-white rounded-lg shadow-inner p-4 overflow-y-auto mb-4 space-y-4">

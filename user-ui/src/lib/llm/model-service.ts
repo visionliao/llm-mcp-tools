@@ -52,11 +52,11 @@ function parseModelSelection(selectedValue: string): { provider: string; model: 
  * @param messages 对话历史
  * @returns 返回一个可读的文本流
  */
-export async function handleChatStream(
+export async function handleChat(
   selectedModel: string,
   messages: ChatMessage[],
   options?: LlmGenerationOptions
-): Promise<ReadableStream<string>> {
+): Promise<ReadableStream<string> | string> {
   // 在处理任何请求之前，首先确保代理已初始化
   initializeGlobalProxy();
 
@@ -67,8 +67,11 @@ export async function handleChatStream(
   const chatProvider = await createChatProvider(provider, options);
 
   // 3. 调用 Provider 的方法执行核心操作
-  const stream = await chatProvider.chat(model, messages);
-
-  // 4. 返回结果
-  return stream;
+  // 如果 stream 选项为 false，则调用非流式方法。
+  // 默认（undefined）或 true 时，调用流式方法。
+  if (options?.stream === false) {
+    return chatProvider.chatNonStreaming(model, messages);
+  } else {
+    return chatProvider.chatStreaming(model, messages);
+  }
 }
