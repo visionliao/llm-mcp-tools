@@ -1,7 +1,7 @@
 // app/api/mcp-test/route.ts
 
 import { NextRequest, NextResponse } from 'next/server';
-import { ToolClient } from '@/lib/llm/tool-client';
+import { ToolClient } from '@/lib/llm/tools/tool-client';
 
 interface TestRequestBody {
   url: string;
