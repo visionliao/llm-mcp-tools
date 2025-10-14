@@ -48,9 +48,10 @@ export async function POST(request: NextRequest): Promise<NextResponse<TestRespo
         throw new Error('No tools available on the server');
       }
 
-      // 判断服务器类型
-      const isFastMCP = url.includes(':8001');
-      const serverType = isFastMCP ? 'FastMCP' : 'FastAPI';
+      // 获取检测到的服务器类型
+      const detectedServerType = await client.getServerType();
+      const serverType = detectedServerType === 'fastmcp' ? 'FastMCP' :
+                        detectedServerType === 'fastapi' ? 'FastAPI' : 'Unknown';
 
       const result: TestResponse = {
         status: 'ok',
