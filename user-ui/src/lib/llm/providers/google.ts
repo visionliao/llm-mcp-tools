@@ -1,6 +1,7 @@
-import { GoogleGenerativeAI, Content, GenerationConfig, SingleRequestOptions } from "@google/generative-ai";
+import { GoogleGenerativeAI, Content, GenerationConfig, SingleRequestOptions, FunctionDeclaration } from "@google/generative-ai";
 import { BaseChatProvider } from "../base-provider";
 import { ChatMessage } from "../types";
+import { McpToolSchema } from "../tools/tool-client";
 
 export class GoogleChatProvider extends BaseChatProvider {
   /**
@@ -23,7 +24,8 @@ export class GoogleChatProvider extends BaseChatProvider {
   protected async _generateChatStream(
     model: string,
     messages: ChatMessage[],
-    signal: AbortSignal
+    signal: AbortSignal,
+    tools?: McpToolSchema[]
   ): Promise<ReadableStream<string>> {
     // 使用从基类继承的配置初始化 SDK
     const genAI = new GoogleGenerativeAI(this.config.apiKey);
@@ -36,10 +38,15 @@ export class GoogleChatProvider extends BaseChatProvider {
     // if (this.config.presencePenalty !== undefined) generationConfig.presencePenalty = this.config.presencePenalty;
     // if (this.config.frequencyPenalty !== undefined) generationConfig.frequencyPenalty = this.config.frequencyPenalty;
 
+    // 格式化工具以适配 Google API
+    // Google API 需要一个 Tool 数组，每个 Tool 包含一个 functionDeclarations 数组
+    const googleTools = tools?.map(tool => tool.function as FunctionDeclaration);
+
     // 初始化模型，配置温度、topP、topK、maxOutputTokens等
     const generativeModel = genAI.getGenerativeModel({ 
       model,
       generationConfig,
+      tools: googleTools ? [{ functionDeclarations: googleTools }] : undefined,
     });
 
     // 格式化消息
@@ -50,6 +57,7 @@ export class GoogleChatProvider extends BaseChatProvider {
     console.log('Provider: Google');
     console.log('Model:', model);
     console.log('Final Generation Config:', JSON.stringify(generationConfig, null, 2));
+    if (googleTools) console.log('Final Tools: ', googleTools.length);
     console.log('Final Messages Payload:', JSON.stringify(formattedMessages, null, 2));
     console.log('-------------------------------------\n');
 
@@ -98,7 +106,8 @@ export class GoogleChatProvider extends BaseChatProvider {
   protected async _generateChatNonStreaming(
     model: string,
     messages: ChatMessage[],
-    signal: AbortSignal
+    signal: AbortSignal,
+    tools?: McpToolSchema[]
   ): Promise<string> {
     const genAI = new GoogleGenerativeAI(this.config.apiKey);
     // 从 this.config 中提取并适配 Google SDK 的参数
@@ -110,9 +119,14 @@ export class GoogleChatProvider extends BaseChatProvider {
     // if (this.config.presencePenalty !== undefined) generationConfig.presencePenalty = this.config.presencePenalty;
     // if (this.config.frequencyPenalty !== undefined) generationConfig.frequencyPenalty = this.config.frequencyPenalty;
 
+    // 格式化工具以适配 Google API
+    // Google API 需要一个 Tool 数组，每个 Tool 包含一个 functionDeclarations 数组
+    const googleTools = tools?.map(tool => tool.function as FunctionDeclaration);
+
     const generativeModel = genAI.getGenerativeModel({ 
       model,
       generationConfig,
+      tools: googleTools ? [{ functionDeclarations: googleTools }] : undefined,
     });
     
     const formattedMessages = this.mapMessagesToGoogleFormat(messages);
@@ -121,6 +135,7 @@ export class GoogleChatProvider extends BaseChatProvider {
     console.log('Provider: Google');
     console.log('Model:', model);
     console.log('Final Generation Config:', JSON.stringify(generationConfig, null, 2));
+    if (googleTools) console.log('Final Tools: ', googleTools.length);
     console.log('Final Messages Payload:', JSON.stringify(formattedMessages, null, 2));
     console.log('-------------------------------------\n');
 

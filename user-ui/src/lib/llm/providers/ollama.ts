@@ -1,6 +1,7 @@
 import { Ollama } from 'ollama';
 import { BaseChatProvider } from '../base-provider';
 import { BaseProviderConfig, ChatMessage, LlmGenerationOptions } from '../types';
+import { McpToolSchema } from '../tools/tool-client';
 
 // Ollama API 使用不同的参数名，我们需要一个映射
 // 例如：maxOutputTokens -> num_predict
@@ -42,7 +43,8 @@ export class OllamaChatProvider extends BaseChatProvider {
   protected async _generateChatStream(
     model: string,
     messages: ChatMessage[],
-    signal: AbortSignal
+    signal: AbortSignal,
+    tools?: McpToolSchema[]
   ): Promise<ReadableStream<string>> {
     const options = this.buildOllamaOptions();
 
@@ -52,6 +54,7 @@ export class OllamaChatProvider extends BaseChatProvider {
     console.log('Provider: Ollama');
     console.log('Model:', model);
     console.log('Final Generation Options:', JSON.stringify(options, null, 2));
+    if (tools) console.log('Final Tools: ', tools.length);
     console.log('Final Messages Payload:', JSON.stringify(messages, null, 2));
     console.log('-------------------------------------\n');
 
@@ -61,6 +64,7 @@ export class OllamaChatProvider extends BaseChatProvider {
         messages: messages,
         stream: true,
         options: options,
+        tools: tools,
       });
 
       // 将 Ollama SDK 的流转换为标准的 Web ReadableStream
@@ -92,7 +96,8 @@ export class OllamaChatProvider extends BaseChatProvider {
   protected async _generateChatNonStreaming(
     model: string,
     messages: ChatMessage[],
-    signal: AbortSignal
+    signal: AbortSignal,
+    tools?: McpToolSchema[]
   ): Promise<string> {
     const options = this.buildOllamaOptions();
     
@@ -102,6 +107,7 @@ export class OllamaChatProvider extends BaseChatProvider {
     console.log('Provider: Ollama');
     console.log('Model:', model);
     console.log('Final Generation Options:', JSON.stringify(options, null, 2));
+    if (tools) console.log('Final Tools: ', tools.length);
     console.log('Final Messages Payload:', JSON.stringify(messages, null, 2));
     console.log('-----------------------------------------\n');
 
@@ -113,6 +119,7 @@ export class OllamaChatProvider extends BaseChatProvider {
         messages: messages,
         stream: false,
         options: options,
+        tools: tools,
       });
 
       return response.message.content;

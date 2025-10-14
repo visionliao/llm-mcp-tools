@@ -159,7 +159,7 @@ export class ToolClient {
                 this.toolsCache = schema as McpToolSchema[];
             }
 
-            console.log(`--- 获取工具列表结果： ${JSON.stringify(this.toolsCache, null, 2)}`);
+            // console.log(`--- 获取工具列表结果： ${JSON.stringify(this.toolsCache, null, 2)}`);
             return this.toolsCache;
         } catch (error) {
             console.error("[ToolClient] Failed to get tools schema:", error);

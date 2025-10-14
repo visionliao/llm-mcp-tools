@@ -1,4 +1,6 @@
 import { ChatMessage, BaseProviderConfig } from './types';
+import { getToolClientInstance } from './tools/tool-client-manager';
+import { McpToolSchema } from './tools/tool-client';
 
 /**
  * 所有聊天提供商（Provider）必须继承的抽象基类。
@@ -23,6 +25,19 @@ export abstract class BaseChatProvider {
       throw new Error("Message history cannot be empty.");
     }
 
+    // 获取工具
+    let tools: McpToolSchema[] | undefined;
+    if (this.config.mcpServerUrl) {
+      try {
+        console.log(`[BaseProvider] MCP server URL found: ${this.config.mcpServerUrl}. Fetching tools...`);
+        const toolClient = getToolClientInstance(this.config.mcpServerUrl);
+        tools = await toolClient.getToolsSchema();
+      } catch (error) {
+        // 如果工具获取失败，只打印错误，不中断聊天流程
+        console.error("[BaseProvider] Failed to get tools schema, proceeding without tools.", error);
+      }
+    }
+
     const controller = new AbortController();
     // 从实例自身的配置中获取最终确定的超时时间
     const timeoutMs = this.config.timeoutMs || 60000;
@@ -30,7 +45,7 @@ export abstract class BaseChatProvider {
 
     try {
       // 创建实际的聊天请求 Promise，并将 AbortSignal 传递下去
-      const chatPromise = this._generateChatStream(model, messages, controller.signal);
+      const chatPromise = this._generateChatStream(model, messages, controller.signal, tools);
 
       // 创建一个与聊天请求并行的“定时炸弹” Promise
       const timeoutPromise = new Promise<never>((_, reject) => {
@@ -61,7 +76,8 @@ export abstract class BaseChatProvider {
   protected abstract _generateChatStream(
     model: string,
     messages: ChatMessage[],
-    signal: AbortSignal
+    signal: AbortSignal,
+    tools?: McpToolSchema[]
   ): Promise<ReadableStream<string>>;
 
   /**
@@ -74,12 +90,24 @@ export abstract class BaseChatProvider {
       throw new Error("Message history cannot be empty.");
     }
 
+    // --- 新增逻辑：获取工具 ---
+    let tools: McpToolSchema[] | undefined;
+    if (this.config.mcpServerUrl) {
+      try {
+        console.log(`[BaseProvider] MCP server URL found: ${this.config.mcpServerUrl}. Fetching tools...`);
+        const toolClient = getToolClientInstance(this.config.mcpServerUrl);
+        tools = await toolClient.getToolsSchema();
+      } catch (error) {
+        console.error("[BaseProvider] Failed to get tools schema, proceeding without tools.", error);
+      }
+    }
+
     const controller = new AbortController();
     const timeoutMs = this.config.timeoutMs || 60000;
     let timeoutId: NodeJS.Timeout | null = null;
 
     try {
-      const chatPromise = this._generateChatNonStreaming(model, messages, controller.signal);
+      const chatPromise = this._generateChatNonStreaming(model, messages, controller.signal, tools);
 
       const timeoutPromise = new Promise<never>((_, reject) => {
         timeoutId = setTimeout(() => {
@@ -104,6 +132,7 @@ export abstract class BaseChatProvider {
   protected abstract _generateChatNonStreaming(
     model: string,
     messages: ChatMessage[],
-    signal: AbortSignal
+    signal: AbortSignal,
+    tools?: McpToolSchema[]
   ): Promise<string>;
 }
