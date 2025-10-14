@@ -1,6 +1,6 @@
-import { Ollama } from 'ollama';
+import { Ollama, type Message } from 'ollama';
 import { BaseChatProvider } from '../base-provider';
-import { BaseProviderConfig, ChatMessage, LlmGenerationOptions } from '../types';
+import { BaseProviderConfig, ChatMessage, LlmGenerationOptions, ToolCall, LlmProviderResponse } from '../types';
 import { McpToolSchema } from '../tools/tool-client';
 
 // Ollama API 使用不同的参数名，我们需要一个映射
@@ -40,6 +40,34 @@ export class OllamaChatProvider extends BaseChatProvider {
     return options;
   }
 
+  /**
+   * 将 ChatMessage[] 格式化为 Ollama 库所需的 Message[] 格式。
+   * @param messages 消息数组
+   * @returns 符合 Ollama SDK 要求的消息数组
+   */
+  private formatMessagesForOllama(messages: ChatMessage[]): Message[] {
+    return messages.map(msg => {
+      // 创建一个符合 Ollama.Message 基础结构的对象
+      const formattedMessage: Message = {
+        role: msg.role as 'user' | 'assistant' | 'system' | 'tool',
+        content: msg.content ?? '', // 确保 content 是 string
+      };
+
+      // 如果是 assistant 发出的工具调用，需要特殊处理 tool_calls 字段
+      if (msg.role === 'assistant' && msg.tool_calls) {
+        formattedMessage.tool_calls = msg.tool_calls.map(tc => ({
+          function: {
+            name: tc.function.name,
+            // 将 JSON 字符串解析回 JavaScript 对象
+            arguments: JSON.parse(tc.function.arguments),
+          },
+        }));
+      }
+
+      return formattedMessage;
+    });
+  }
+
   protected async _generateChatStream(
     model: string,
     messages: ChatMessage[],
@@ -59,9 +87,12 @@ export class OllamaChatProvider extends BaseChatProvider {
     console.log('-------------------------------------\n');
 
     try {
+      // 消息格式转换
+      const formattedMessages = this.formatMessagesForOllama(messages);
+
       const response = await this.ollama.chat({
         model: model,
-        messages: messages,
+        messages: formattedMessages,
         stream: true,
         options: options,
         tools: tools,
@@ -98,7 +129,7 @@ export class OllamaChatProvider extends BaseChatProvider {
     messages: ChatMessage[],
     signal: AbortSignal,
     tools?: McpToolSchema[]
-  ): Promise<string> {
+  ): Promise<LlmProviderResponse> {
     const options = this.buildOllamaOptions();
     
     // --- 日志记录 ---
@@ -108,21 +139,38 @@ export class OllamaChatProvider extends BaseChatProvider {
     console.log('Model:', model);
     console.log('Final Generation Options:', JSON.stringify(options, null, 2));
     if (tools) console.log('Final Tools: ', tools.length);
-    console.log('Final Messages Payload:', JSON.stringify(messages, null, 2));
+    console.log('单次对话工具调用记录:', JSON.stringify(messages, null, 2));
     console.log('-----------------------------------------\n');
 
     try {
+      const formattedMessages = this.formatMessagesForOllama(messages);
       // 非流式调用，但我们可以通过 AbortSignal 和超时来控制
       // Ollama 库的 fetch 调用会继承我们设置的全局 dispatcher
       const response = await this.ollama.chat({
         model: model,
-        messages: messages,
+        messages: formattedMessages,
         stream: false,
         options: options,
         tools: tools,
       });
 
-      return response.message.content;
+      const responseMessage = response.message;
+      console.log('ollama大模型响应非流式输出:', JSON.stringify(responseMessage, null, 2));
+      const toolCalls: ToolCall[] | undefined = responseMessage.tool_calls?.map((tc, index) => ({
+        // Ollama 不提供ID，创建一个
+        id: `${tc.function.name}_${Date.now()}_${index}`,
+        type: 'function',
+        function: {
+          name: tc.function.name,
+          // Ollama 返回的是对象，将其字符串化以符合ToolCall的类型
+          arguments: JSON.stringify(tc.function.arguments),
+        }
+      }));
+
+      return {
+        content: responseMessage.content,
+        tool_calls: toolCalls,
+      };
     } catch (error: any) {
       if (error.name === 'AbortError') {
         throw new Error(`Request to Ollama timed out.`);

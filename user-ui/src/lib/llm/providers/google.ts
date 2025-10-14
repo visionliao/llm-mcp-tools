@@ -1,6 +1,6 @@
-import { GoogleGenerativeAI, Content, GenerationConfig, SingleRequestOptions, FunctionDeclaration } from "@google/generative-ai";
+import { GoogleGenerativeAI, Content, GenerationConfig, SingleRequestOptions, FunctionDeclaration, Part } from "@google/generative-ai";
 import { BaseChatProvider } from "../base-provider";
-import { ChatMessage } from "../types";
+import { ChatMessage, ToolCall, LlmProviderResponse } from "../types";
 import { McpToolSchema } from "../tools/tool-client";
 
 export class GoogleChatProvider extends BaseChatProvider {
@@ -10,14 +10,67 @@ export class GoogleChatProvider extends BaseChatProvider {
    * @returns Google API 格式的 Content 数组
    */
   private mapMessagesToGoogleFormat(messages: ChatMessage[]): Content[] {
-    // Google API 不支持 'system' 角色，这里我们将其过滤掉。
-    // 在更复杂的场景中，可以考虑将其内容附加到第一条用户消息前。
+    // 用于在处理 tool 消息时查找其对应的 function name
+    const toolCallIdToFunctionNameMap = new Map<string, string>();
+
     return messages
-      .filter(msg => msg.role !== 'system')
-      .map(msg => ({
-        role: msg.role === 'assistant' ? 'model' : 'user', // Google 使用 'model' 代表 'assistant'
-        parts: [{ text: msg.content }],
-      }));
+      .filter(msg => msg.role !== 'system') // 过滤掉 system 消息
+      .map(msg => {
+        switch (msg.role) {
+          case 'user':
+            return {
+              role: 'user',
+              parts: [{ text: msg.content ?? '' }],
+            };
+
+          case 'assistant':
+            const assistantParts: Part[] = [];
+            // 如果助手消息有文本内容，则添加 text part
+            if (msg.content) {
+              assistantParts.push({ text: msg.content });
+            }
+            // 如果助手消息有工具调用请求，则添加 functionCall part
+            if (msg.tool_calls) {
+              for (const toolCall of msg.tool_calls) {
+                // 缓存 tool_call_id 和 function name 的映射关系
+                toolCallIdToFunctionNameMap.set(toolCall.id, toolCall.function.name);
+                assistantParts.push({
+                  functionCall: {
+                    name: toolCall.function.name,
+                    args: JSON.parse(toolCall.function.arguments),
+                  },
+                });
+              }
+            }
+            return { role: 'model', parts: assistantParts };
+
+          case 'tool':
+            // Google API 要求 tool 角色被称为 'function'
+            // 从缓存中找到这个 tool call 对应的函数名
+            const functionName = toolCallIdToFunctionNameMap.get(msg.tool_call_id!);
+            if (!functionName) {
+              // 如果找不到函数名，这通常是一个逻辑错误，但我们可以先跳过此消息
+              console.warn(`Could not find function name for tool_call_id: ${msg.tool_call_id}`);
+              return null; // 返回 null，之后会被过滤掉
+            }
+            return {
+              role: 'function',
+              parts: [
+                {
+                  functionResponse: {
+                    name: functionName,
+                    // Google 期望 response 是一个对象，而不是字符串
+                    response: { result: msg.content },
+                  },
+                },
+              ],
+            };
+
+          default:
+            return null; // 理论上不会发生
+        }
+      })
+      .filter((msg): msg is Content => msg !== null); // 过滤掉所有 null 的结果
   }
 
   // 流式输出
@@ -108,7 +161,7 @@ export class GoogleChatProvider extends BaseChatProvider {
     messages: ChatMessage[],
     signal: AbortSignal,
     tools?: McpToolSchema[]
-  ): Promise<string> {
+  ): Promise<LlmProviderResponse> {
     const genAI = new GoogleGenerativeAI(this.config.apiKey);
     // 从 this.config 中提取并适配 Google SDK 的参数
     const generationConfig: GenerationConfig = {};
@@ -130,13 +183,13 @@ export class GoogleChatProvider extends BaseChatProvider {
     });
     
     const formattedMessages = this.mapMessagesToGoogleFormat(messages);
-    console.log('\n--- [LLM Request Log - NonStreaming] ---');
+    console.log('\n--- [大模型请求日志 - 非流式输出] ---');
     console.log(`Timestamp: ${new Date().toISOString()}`);
     console.log('Provider: Google');
     console.log('Model:', model);
     console.log('Final Generation Config:', JSON.stringify(generationConfig, null, 2));
     if (googleTools) console.log('Final Tools: ', googleTools.length);
-    console.log('Final Messages Payload:', JSON.stringify(formattedMessages, null, 2));
+    console.log('单次对话工具调用记录:', JSON.stringify(formattedMessages, null, 2));
     console.log('-------------------------------------\n');
 
     try {
@@ -152,9 +205,34 @@ export class GoogleChatProvider extends BaseChatProvider {
       );
 
       const response = result.response;
-      const text = response.text();
-      console.log(`大模型响应非流式输出: "${text}"`);
-      return text;
+      console.log('google大模型响应非流式输出:', JSON.stringify(response, null, 2));
+      // 从 Google 的响应中安全地提取文本内容和工具调用
+      const candidates = response.candidates;
+      if (!candidates || candidates.length === 0) {
+        throw new Error("Invalid response structure from Google Gemini: no candidates.");
+      }
+      const contentParts = candidates[0].content?.parts || [];
+      const textContent = contentParts.find(part => part.text)?.text ?? null;
+
+      const toolCalls: ToolCall[] = contentParts
+        .filter(part => part.functionCall)
+        .map((part, index) => {
+          // Google API 不直接提供唯一ID，我们手动创建一个
+          const toolCallId = `tool_call_${Date.now()}_${index}`;
+          return {
+            id: toolCallId,
+            type: 'function',
+            function: {
+              name: part.functionCall!.name,
+              arguments: JSON.stringify(part.functionCall!.args),
+            },
+          };
+        });
+
+      return {
+        content: textContent,
+        tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
+      };
     } catch (error: any) {
       if (error.name === 'AbortError' || (error.cause && error.cause.name === 'TimeoutError')) {
         console.error("Google Gemini API request was aborted due to timeout.", { model });

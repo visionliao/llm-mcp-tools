@@ -35,7 +35,7 @@ export default function Home() {
   // 控制历史记录长度
   const [historyLength, setHistoryLength] = useState(4); // 默认保留最近4条消息
   // MCP 相关 state
-  const [mcpServerUrl, setMcpServerUrl] = useState("http://127.0.0.1:8000");
+  const [mcpServerUrl, setMcpServerUrl] = useState("http://127.0.0.1:8001");
   const [mcpStatus, setMcpStatus] = useState<'unchecked' | 'ok' | 'error' | 'testing'>('unchecked');
 
   // 连接测试处理函数

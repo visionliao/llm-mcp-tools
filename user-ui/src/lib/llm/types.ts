@@ -1,9 +1,29 @@
 /**
+ * 代表一个由 assistant 发起的工具调用请求。
+ */
+export interface ToolCall {
+  id: string; // 该工具调用的唯一 ID
+  type: 'function';
+  function: {
+    name: string;
+    arguments: string; // 参数通常是一个 JSON 字符串
+  };
+}
+
+// 定义从 Provider 返回的复杂响应结构
+export interface LlmProviderResponse {
+  content: string | null;
+  tool_calls?: ToolCall[];
+}
+
+/**
  * 通用的消息结构，支持 user, assistant, 和 system 角色
  */
 export interface ChatMessage {
-  role: 'user' | 'assistant' | 'system';
-  content: string;
+  role: 'user' | 'assistant' | 'system' | 'tool';
+  content: string | null; // 如果 assistant 消息只包含工具调用，内容可能为 null
+  tool_calls?: ToolCall[]; // 用于 assistant 消息，存放一个或多个工具调用请求
+  tool_call_id?: string;   // 用于 tool 消息，关联它所响应的那个 tool_call 请求
 }
 
 /**
