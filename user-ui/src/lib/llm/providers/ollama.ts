@@ -68,6 +68,26 @@ export class OllamaChatProvider extends BaseChatProvider {
     });
   }
 
+  // 辅助函数，用于构建每次 API 请求所需的消息体，主要是为了把系统提示词放进去
+  private buildMessagesForApi(messages: ChatMessage[]): ChatMessage[] {
+    // 创建一个全新的数组副本，以避免修改原始历史
+    const apiMessages = [...messages];
+
+    // 如果配置了 systemPrompt
+    if (this.config.systemPrompt) {
+      const firstMessage = apiMessages[0];
+      // 检查第一条消息是否已经是 system prompt
+      if (firstMessage && firstMessage.role === 'system') {
+        // 如果是，就用新的内容更新它，以支持动态修改
+        firstMessage.content = this.config.systemPrompt;
+      } else {
+        // 如果不是，就在最前面插入一个新的 system prompt
+        apiMessages.unshift({ role: 'system', content: this.config.systemPrompt });
+      }
+    }
+    return apiMessages;
+  }
+
   protected async _generateChatStream(
     model: string,
     messages: ChatMessage[],
@@ -81,14 +101,16 @@ export class OllamaChatProvider extends BaseChatProvider {
     console.log(`Timestamp: ${new Date().toISOString()}`);
     console.log('Provider: Ollama');
     console.log('Model:', model);
-    console.log('Final Generation Options:', JSON.stringify(options, null, 2));
-    if (tools) console.log('Final Tools: ', tools.length);
-    console.log('Final Messages Payload:', JSON.stringify(messages, null, 2));
+    console.log('参数配置信息:', JSON.stringify(options, null, 2));
+    if (tools) console.log('可用工具数量: ', tools.length);
     console.log('-------------------------------------\n');
 
     try {
+      // 将系统提示词添加消息中
+      const messagesForApi = this.buildMessagesForApi(messages);
       // 消息格式转换
-      const formattedMessages = this.formatMessagesForOllama(messages);
+      const formattedMessages = this.formatMessagesForOllama(messagesForApi);
+      console.log('ollama发送给大模型的消息:', JSON.stringify(formattedMessages, null, 2));
 
       const response = await this.ollama.chat({
         model: model,
@@ -109,8 +131,10 @@ export class OllamaChatProvider extends BaseChatProvider {
           });
 
           for await (const part of response) {
-            if (part.message.content) {
-              controller.enqueue(part.message.content);
+            const messageChunk = part.message.content;
+            if (messageChunk) {
+              console.log(`ollama大模型流式输出: "${messageChunk}"`);
+              controller.enqueue(messageChunk);
             }
           }
           controller.close();
@@ -137,15 +161,18 @@ export class OllamaChatProvider extends BaseChatProvider {
     console.log(`Timestamp: ${new Date().toISOString()}`);
     console.log('Provider: Ollama');
     console.log('Model:', model);
-    console.log('Final Generation Options:', JSON.stringify(options, null, 2));
-    if (tools) console.log('Final Tools: ', tools.length);
-    console.log('单次对话工具调用记录:', JSON.stringify(messages, null, 2));
+    console.log('参数配置信息:', JSON.stringify(options, null, 2));
+    if (tools) console.log('可用工具数量: ', tools.length);
     console.log('-----------------------------------------\n');
 
     try {
-      const formattedMessages = this.formatMessagesForOllama(messages);
-      // 非流式调用，但我们可以通过 AbortSignal 和超时来控制
-      // Ollama 库的 fetch 调用会继承我们设置的全局 dispatcher
+      // 将系统提示词添加消息中
+      const messagesForApi = this.buildMessagesForApi(messages);
+      // 消息格式转换
+      const formattedMessages = this.formatMessagesForOllama(messagesForApi);
+      console.log('ollama发送给大模型的消息:', JSON.stringify(formattedMessages, null, 2));
+      // 非流式调用，可以通过 AbortSignal 和超时来控制
+      // Ollama 库的 fetch 调用会继承设置的全局 dispatcher
       const response = await this.ollama.chat({
         model: model,
         messages: formattedMessages,

@@ -100,6 +100,7 @@ export class GoogleChatProvider extends BaseChatProvider {
       model,
       generationConfig,
       tools: googleTools ? [{ functionDeclarations: googleTools }] : undefined,
+      systemInstruction: this.config.systemPrompt || undefined,
     });
 
     // 格式化消息
@@ -109,8 +110,9 @@ export class GoogleChatProvider extends BaseChatProvider {
     console.log(`Timestamp: ${new Date().toISOString()}`);
     console.log('Provider: Google');
     console.log('Model:', model);
-    console.log('Final Generation Config:', JSON.stringify(generationConfig, null, 2));
-    if (googleTools) console.log('Final Tools: ', googleTools.length);
+    console.log('系统提示词:', this.config.systemPrompt);
+    console.log('参数配置信息:', JSON.stringify(generationConfig, null, 2));
+    if (googleTools) console.log('可用工具数量: ', googleTools.length);
     console.log('Final Messages Payload:', JSON.stringify(formattedMessages, null, 2));
     console.log('-------------------------------------\n');
 
@@ -180,6 +182,7 @@ export class GoogleChatProvider extends BaseChatProvider {
       model,
       generationConfig,
       tools: googleTools ? [{ functionDeclarations: googleTools }] : undefined,
+      systemInstruction: this.config.systemPrompt || undefined,
     });
     
     const formattedMessages = this.mapMessagesToGoogleFormat(messages);
@@ -187,8 +190,9 @@ export class GoogleChatProvider extends BaseChatProvider {
     console.log(`Timestamp: ${new Date().toISOString()}`);
     console.log('Provider: Google');
     console.log('Model:', model);
-    console.log('Final Generation Config:', JSON.stringify(generationConfig, null, 2));
-    if (googleTools) console.log('Final Tools: ', googleTools.length);
+    console.log('系统提示词:', this.config.systemPrompt);
+    console.log('参数配置信息:', JSON.stringify(generationConfig, null, 2));
+    if (googleTools) console.log('可用工具数量: ', googleTools.length);
     console.log('单次对话工具调用记录:', JSON.stringify(formattedMessages, null, 2));
     console.log('-------------------------------------\n');
 

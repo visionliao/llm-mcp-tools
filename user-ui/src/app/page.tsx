@@ -37,7 +37,17 @@ export default function Home() {
   // MCP 相关 state
   const [mcpServerUrl, setMcpServerUrl] = useState("http://127.0.0.1:8001");
   const [mcpStatus, setMcpStatus] = useState<'unchecked' | 'ok' | 'error' | 'testing'>('unchecked');
+  // System Prompt
+  const [systemPrompt, setSystemPrompt] = useState(
+`You are a helpful assistant with access to external tools.
+Your primary goal is to answer the user's questions using these tools.
 
+CRITICAL RULES:
+1. DO NOT write or execute any code (Python, JavaScript, etc.).
+2. To use a tool, you MUST output a standard JSON Function Call.
+3. If a task requires multiple steps, break it down. Call the first tool, wait for the result, then call the next tool.
+4. Only use the tools that have been provided to you.`
+  );
   // 连接测试处理函数
   const handleConnectivityTest = async () => {
     if (!mcpServerUrl.trim()) {
@@ -128,6 +138,7 @@ export default function Home() {
       frequencyPenalty,
       maxOutputTokens,
       mcpServerUrl: mcpServerUrl,
+      systemPrompt: systemPrompt,
     };
     try {
       const response = await fetch('/api/chat', {
@@ -145,7 +156,7 @@ export default function Home() {
         throw new Error(errorData.error || '服务器响应错误');
       }
 
-      // VVV  根据开关状态，决定如何处理响应  VVV
+      // 根据开关状态，决定如何处理响应
       if (isStreamingEnabled) {
         // 处理流式响应
         if (!response.body) throw new Error("Streaming response has no body");
@@ -219,10 +230,24 @@ export default function Home() {
               </div>
             )}
           </div>
+          {/* --- 系统提示词  --- */}
+          <div className="mb-4">
+            <label htmlFor="systemPrompt" className="block text-sm font-medium text-gray-700 mb-1">
+              系统提示词 (System Prompt)
+            </label>
+            <textarea
+              id="systemPrompt"
+              value={systemPrompt}
+              onChange={(e) => setSystemPrompt(e.target.value)}
+              placeholder="输入系统提示词..."
+              rows={5}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y text-sm"
+            />
+          </div>
 
           {/* --- 在模型选择下方添加参数滑块 --- */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4 mb-4 p-4 border rounded-lg bg-white text-sm">
-            {/* --- 第一行：创意活跃度 和 思维开放度 --- */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-x-6 gap-y-4 mb-4 p-4 border rounded-lg bg-white text-sm">
+            {/* --- 第一行：创意活跃度 和 思维开放度 和 表述发散度 --- */}
             <div>
               <label htmlFor="temperature" className="flex justify-between"><span>创意活跃度 (Temperature)</span> <span>{temperature.toFixed(1)}</span></label>
               <input type="range" id="temperature" min="0" max="2" step="0.1" value={temperature} onChange={(e) => setTemperature(parseFloat(e.target.value))}
@@ -233,18 +258,17 @@ export default function Home() {
               <input type="range" id="topP" min="0" max="1" step="0.05" value={topP} onChange={(e) => setTopP(parseFloat(e.target.value))}
                 className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"/>
             </div>
-            {/* --- 第二行：表述发散度 和 词汇丰富度 --- */}
             <div>
               <label htmlFor="presencePenalty" className="flex justify-between"><span>表述发散度 (Presence Penalty)</span> <span>{presencePenalty.toFixed(1)}</span></label>
               <input type="range" id="presencePenalty" min="-2" max="1.9" step="0.1" value={presencePenalty} onChange={(e) => setPresencePenalty(parseFloat(e.target.value))}
                 className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"/>
             </div>
+            {/* --- 第二行：词汇丰富度 和 Max Tokens 和 历史记录条数 --- */}
             <div>
               <label htmlFor="frequencyPenalty" className="flex justify-between"><span>词汇丰富度 (Frequency Penalty)</span> <span>{frequencyPenalty.toFixed(1)}</span></label>
               <input type="range" id="frequencyPenalty" min="-2" max="1.9" step="0.1" value={frequencyPenalty} onChange={(e) => setFrequencyPenalty(parseFloat(e.target.value))}
                 className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"/>
             </div>
-            {/* --- 第三行： Max Tokens 和 历史记录条数 --- */}
             <div>
               <label htmlFor="maxTokens" className="flex justify-between"><span>单次回复限制 (Max Tokens)</span> <span>{maxOutputTokens}</span></label>
               <input type="range" id="maxTokens" min="256" max="32000" step="256" value={maxOutputTokens} onChange={(e) => setMaxOutputTokens(parseInt(e.target.value, 10))}
@@ -255,6 +279,7 @@ export default function Home() {
               <input type="range" id="historyLength" min="0" max="100" step="1" value={historyLength} onChange={(e) => setHistoryLength(parseInt(e.target.value, 10))}
                 className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"/>
             </div>
+            {/* --- 第三行：启用流式输出 和 MCP服务器地址  --- */}
             <div className="md:col-span-2 flex items-center justify-between space-x-2">
               <input
                 type="checkbox" id="stream-toggle" checked={isStreamingEnabled}
@@ -299,7 +324,7 @@ export default function Home() {
                 </div>
               </div>
             ))}
-            {/* 【新增】如果正在接收流式响应，则渲染这个临时消息块 */}
+            {/* 如果正在接收流式响应，则渲染这个临时消息块 */}
             {streamingResponse && (
               <div className="flex justify-start">
                 <div className="whitespace-pre-wrap max-w-xl px-4 py-2 rounded-lg shadow-sm bg-gray-200 text-gray-800">
