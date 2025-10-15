@@ -128,7 +128,7 @@ export class FastMCPClient {
             });
 
             const result = await Promise.race([toolPromise, timeoutPromise]) as CallToolResult;
-            console.log(`--- FastMCP工具执行结果： ${JSON.stringify(result, null, 2)}`);
+            // console.log(`--- FastMCP工具执行结果： ${JSON.stringify(result, null, 2)}`);
 
             // 处理不同类型的返回结果
             if (result.content && Array.isArray(result.content)) {
