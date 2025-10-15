@@ -1,3 +1,5 @@
+// lib/llm/types.ts
+
 /**
  * 代表一个由 assistant 发起的工具调用请求。
  */

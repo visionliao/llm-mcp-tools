@@ -1,4 +1,4 @@
-// lib/llm/fastmcp-client.ts
+// lib/llm/tools/fastmcp-client.ts
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';

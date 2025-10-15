@@ -1,3 +1,5 @@
+// lib/llm/providers/ollama.ts
+
 import { Ollama, type Message } from 'ollama';
 import { BaseChatProvider } from '../base-provider';
 import { BaseProviderConfig, ChatMessage, LlmGenerationOptions, ToolCall, LlmProviderResponse } from '../types';

@@ -1,3 +1,5 @@
+// lib/llm/providers/google.ts
+
 import { GoogleGenerativeAI, Content, GenerationConfig, SingleRequestOptions, FunctionDeclaration, Part } from "@google/generative-ai";
 import { BaseChatProvider } from "../base-provider";
 import { ChatMessage, ToolCall, LlmProviderResponse } from "../types";

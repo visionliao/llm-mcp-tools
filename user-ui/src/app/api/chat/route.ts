@@ -1,3 +1,5 @@
+// app/api/chat/route.ts
+
 import { NextRequest, NextResponse } from 'next/server';
 import { handleChat } from '@/lib/llm/model-service';
 import { ChatMessage, LlmGenerationOptions } from '@/lib/llm/types';

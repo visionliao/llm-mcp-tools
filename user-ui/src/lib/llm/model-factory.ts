@@ -1,3 +1,5 @@
+// lib/llm/model-factory.ts
+
 import { BaseChatProvider } from './base-provider';
 import { getProviderConfig } from './model-config';
 import { BaseProviderConfig, LlmGenerationOptions } from './types';

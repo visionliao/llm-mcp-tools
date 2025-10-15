@@ -1,4 +1,4 @@
-// lib/llm/tool-client.ts
+// lib/llm/tools/tool-client.ts
 
 import { FastMCPClient } from './fastmcp-client';
 

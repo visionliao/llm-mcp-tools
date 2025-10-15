@@ -1,3 +1,5 @@
+// lib/llm/model-service.ts
+
 import { createChatProvider } from './model-factory';
 import { ChatMessage, LlmGenerationOptions } from './types';
 import { ProxyAgent, setGlobalDispatcher } from 'undici';
