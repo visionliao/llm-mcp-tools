@@ -22,34 +22,35 @@ export abstract class BaseChatProvider {
    * @param messages 对话历史记录
    * @returns 返回一个字符串的可读流 (ReadableStream)
    */
-  public async chatStreaming(model: string, messages: ChatMessage[]): Promise<ReadableStream<string>> {
+  public async chatStreaming(model: string, messages: ChatMessage[]): Promise<ReadableStream<string> | LlmProviderResponse> {
     if (messages.length === 0) {
       throw new Error("Message history cannot be empty.");
     }
 
-    // 获取工具
-    let tools: McpToolSchema[] | undefined;
-    if (this.config.mcpServerUrl) {
-      try {
-        console.log(`[BaseProvider] MCP server URL found: ${this.config.mcpServerUrl}. Fetching tools...`);
-        const toolClient = getToolClientInstance(this.config.mcpServerUrl);
-        tools = await toolClient.getToolsSchema();
-      } catch (error) {
-        // 如果工具获取失败，只打印错误，不中断聊天流程
-        console.error("[BaseProvider] Failed to get tools schema, proceeding without tools.", error);
+    const MAX_TOOL_CALLS = 5; // 设置最大工具调用次数以防止无限循环
+    let toolCallCount = 0;
+    // 创建一个可变的消息历史副本，用于在循环中追加消息
+    const currentMessages: ChatMessage[] = [...messages];
+
+    while (toolCallCount < MAX_TOOL_CALLS) {
+      // 1. 如果配置了 mcp，则获取工具列表
+      let tools: McpToolSchema[] | undefined;
+      if (this.config.mcpServerUrl) {
+        try {
+          console.log(`[BaseProvider] MCP server URL found: ${this.config.mcpServerUrl}. Fetching tools...`);
+          const toolClient = getToolClientInstance(this.config.mcpServerUrl);
+          tools = await toolClient.getToolsSchema();
+        } catch (error) {
+          // 如果工具获取失败，只打印错误，不中断聊天流程
+          console.error("[BaseProvider] Failed to get tools schema, proceeding without tools.", error);
+        }
       }
-    }
 
-    const controller = new AbortController();
-    // 从实例自身的配置中获取最终确定的超时时间
-    const timeoutMs = this.config.timeoutMs || 60000;
-    let timeoutId: NodeJS.Timeout | null = null;
-
-    try {
-      // 创建实际的聊天请求 Promise，并将 AbortSignal 传递下去
-      const chatPromise = this._generateChatStream(model, messages, controller.signal, tools);
-
-      // 创建一个与聊天请求并行的“定时炸弹” Promise
+      // 2. 超时判断
+      const controller = new AbortController();
+      // 从实例自身的配置中获取最终确定的超时时间
+      const timeoutMs = this.config.timeoutMs || 60000;
+      let timeoutId: NodeJS.Timeout | null = null;
       const timeoutPromise = new Promise<never>((_, reject) => {
         timeoutId = setTimeout(() => {
           controller.abort(); // 超时后，中止请求
@@ -57,15 +58,68 @@ export abstract class BaseChatProvider {
         }, timeoutMs);
       });
 
-      // Promise.race 会返回最先完成的那个 Promise 的结果
-      const stream = await Promise.race([chatPromise, timeoutPromise]);
-      return stream;
-    } finally {
-      // 无论成功、失败还是超时，都必须清除定时器以防内存泄漏
-      if (timeoutId) {
-        clearTimeout(timeoutId);
+      // 3. 获取 LLM 的响应
+      const llmResponsePromise = this._generateChatStream(model, currentMessages, controller.signal, tools);
+      const llmResponse = await Promise.race([llmResponsePromise, timeoutPromise]);
+      // 收到响应后，清除定时器
+      if (timeoutId) clearTimeout(timeoutId);
+
+      // 4. 检查 LLM 的响应中是否包含工具调用请求
+      if (llmResponse instanceof ReadableStream) {
+        // 返回的是流，说明没有工具调用，或者工具调用完毕后的大模型最终回复
+        console.log("接收流式输出文本流，判定流程结束，开始进行最终的异步流式输出。");
+        return llmResponse;
+      } else {
+        // 5. 返回LlmProviderResponse，执行工具调用
+        const llmResponseTool = llmResponse as LlmProviderResponse;
+        const toolCalls = llmResponseTool.tool_calls;
+        // 理论上既然返回的不是流，toolCalls 应该存在，做一个健壮性检查
+        if (!toolCalls || toolCalls.length === 0) {
+          throw new Error("逻辑错误: LLM 返回了非流式工具响应但没有找到工具调用信息。");
+        }
+        console.log(`流式输出本次需要调用的工具数量 ${toolCalls.length} 个.`);
+
+        // 6. 将 assistant 的工具调用请求本身也加入到消息历史中
+        currentMessages.push({
+          role: 'assistant',
+          content: llmResponse.content, // content 可能是 null
+          tool_calls: llmResponse.tool_calls,
+        });
+
+        // 7. 并行执行所有工具调用
+        const toolClient = getToolClientInstance(this.config.mcpServerUrl!);
+        const toolResultPromises = toolCalls.map(async (toolCall) => {
+          const { name, arguments: args } = toolCall.function;
+          try {
+            console.log(`执行工具: ${name} 参数列表: ${args}`);
+            const result = await toolClient.callTool(name, JSON.parse(args))
+            // 8. 将每个工具的执行结果包装成一条 'tool' 消息
+            return {
+              role: 'tool' as const,
+              tool_call_id: toolCall.id,
+              content: typeof result === 'string' ? result : JSON.stringify(result),
+            };
+          } catch (error: any) {
+            console.error(`执行 ${name} 工具错误:`, error);
+            return { // 如果工具执行失败，也返回一条错误信息
+              role: 'tool' as const,
+              tool_call_id: toolCall.id,
+              content: `Error: ${error.message}`,
+            };
+          }
+        });
+
+        // 9. 等待所有工具执行完毕，并将结果追加到消息历史
+        const toolResults = await Promise.all(toolResultPromises);
+        currentMessages.push(...toolResults);
+
+        toolCallCount++;
+        // 循环继续，携带更新后的消息历史再次调用 LLM
+        console.error(`工具循环调用次数: ${toolCallCount}`);
       }
     }
+    // 10. 如果循环结束（达到最大调用次数），则抛出错误
+    throw new Error("已达到单次对话工具最大调用次数限制。");
   }
 
   /**
@@ -80,7 +134,7 @@ export abstract class BaseChatProvider {
     messages: ChatMessage[],
     signal: AbortSignal,
     tools?: McpToolSchema[]
-  ): Promise<ReadableStream<string>>;
+  ): Promise<ReadableStream<string> | LlmProviderResponse>;
 
   /**
    * 非流式聊天方法。
@@ -110,7 +164,7 @@ export abstract class BaseChatProvider {
         }
       }
 
-      // 2. 调用 LLM 提供商的底层实现
+      // 2. 超时判断
       const controller = new AbortController();
       const timeoutMs = this.config.timeoutMs || 60000;
       let timeoutId: NodeJS.Timeout | null = null;
@@ -169,6 +223,7 @@ export abstract class BaseChatProvider {
       // 循环继续，携带更新后的消息历史再次调用 LLM
       console.error(`工具循环调用次数: ${toolCallCount}`);
     }
+    // 7. 如果循环结束（达到最大调用次数），则抛出错误
     throw new Error("已经达到单次对话工具最大调用次数限制.");
   }
 
