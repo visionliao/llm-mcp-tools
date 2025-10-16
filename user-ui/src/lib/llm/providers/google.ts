@@ -115,6 +115,7 @@ export class GoogleChatProvider extends BaseChatProvider {
     console.log('系统提示词:', this.config.systemPrompt);
     console.log('参数配置信息:', JSON.stringify(generationConfig, null, 2));
     if (googleTools) console.log('可用工具数量: ', googleTools.length);
+    console.log('最大工具调用次数限制:', this.config.maxToolCalls ?? 5);
     console.log('Final Messages Payload:', JSON.stringify(formattedMessages, null, 2));
     console.log('-------------------------------------\n');
 
@@ -239,6 +240,7 @@ export class GoogleChatProvider extends BaseChatProvider {
     console.log('系统提示词:', this.config.systemPrompt);
     console.log('参数配置信息:', JSON.stringify(generationConfig, null, 2));
     if (googleTools) console.log('可用工具数量: ', googleTools.length);
+    console.log('最大工具调用次数限制:', this.config.maxToolCalls ?? 5);
     console.log('单次对话工具调用记录:', JSON.stringify(formattedMessages, null, 2));
     console.log('-------------------------------------\n');
 

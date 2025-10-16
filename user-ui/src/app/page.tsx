@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, use } from "react";
 import { LlmGenerationOptions } from "@/lib/llm/types"; 
 
 // 定义与后端 lib/llm/types.ts 匹配的类型
@@ -48,6 +48,9 @@ CRITICAL RULES:
 3. If a task requires multiple steps, break it down. Call the first tool, wait for the result, then call the next tool.
 4. Only use the tools that have been provided to you.`
   );
+  // 工具调用最大循环次数
+  const [maxToolCalls, setMaxToolCalls] = useState(5); // 默认5次
+
   // 连接测试处理函数
   const handleConnectivityTest = async () => {
     if (!mcpServerUrl.trim()) {
@@ -139,6 +142,7 @@ CRITICAL RULES:
       maxOutputTokens,
       mcpServerUrl: mcpServerUrl,
       systemPrompt: systemPrompt,
+      maxToolCalls: maxToolCalls,
     };
     try {
       const response = await fetch('/api/chat', {
@@ -275,43 +279,57 @@ CRITICAL RULES:
                 className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"/>
             </div>
             <div>
-              <label htmlFor="historyLength" className="flex justify-between"><span>历史条数</span> <span>{historyLength}</span></label>
+              <label htmlFor="historyLength" className="flex justify-between"><span>附加历史消息条数</span> <span>{historyLength}</span></label>
               <input type="range" id="historyLength" min="0" max="100" step="1" value={historyLength} onChange={(e) => setHistoryLength(parseInt(e.target.value, 10))}
                 className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"/>
             </div>
-            {/* --- 第三行：启用流式输出 和 MCP服务器地址  --- */}
-            <div className="md:col-span-2 flex items-center justify-between space-x-2">
-              <input
-                type="checkbox" id="stream-toggle" checked={isStreamingEnabled}
-                onChange={(e) => setIsStreamingEnabled(e.target.checked)}
-                className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500"
-              />
-              <label htmlFor="stream-toggle" className="ml-2 font-medium text-gray-900">
-                启用流式输出
-              </label>
-              {/* MCP 服务器输入框和测试按钮 */}
-              <input
-                type="text"
-                value={mcpServerUrl}
-                onChange={(e) => {
-                  setMcpServerUrl(e.target.value);
-                  setMcpStatus('unchecked'); // 地址变化后重置状态
-                }}
-                placeholder="MCP 服务器地址"
-                className="flex-grow px-2 py-1 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
-              />
-              <button 
-                onClick={handleConnectivityTest} 
-                disabled={mcpStatus === 'testing'}
-                className={`px-3 py-1 rounded-md text-white text-xs transition-colors ${
-                  mcpStatus === 'testing' ? 'bg-gray-400' :
-                  mcpStatus === 'ok' ? 'bg-green-500 hover:bg-green-600' :
-                  mcpStatus === 'error' ? 'bg-red-500 hover:bg-red-600' :
-                  'bg-blue-500 hover:bg-blue-600'
-                }`}
-              >
-                {mcpStatus === 'testing' ? '测试中...' : '连接测试'}
-              </button>
+            {/* --- 第三行：启用流式输出 和 MCP服务器地址 和最大工具调用次数限制  --- */}
+            <div className="md:col-span-3 grid grid-cols-1 md:grid-cols-3 gap-x-6 items-center">
+              {/* 第一部分: 流式开关 和 MCP 服务器地址 */}
+              <div className="md:col-span-2 flex items-center space-x-4">
+                <div className="flex items-center">
+                  <input
+                    type="checkbox" id="stream-toggle" checked={isStreamingEnabled}
+                    onChange={(e) => setIsStreamingEnabled(e.target.checked)}
+                    className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500"
+                  />
+                  <label htmlFor="stream-toggle" className="ml-2 font-medium text-gray-900 whitespace-nowrap">
+                    启用流式输出
+                  </label>
+                </div>
+
+                <div className="flex-grow flex items-center space-x-2">
+                  <input
+                    type="text"
+                    value={mcpServerUrl}
+                    onChange={(e) => {
+                      setMcpServerUrl(e.target.value);
+                      setMcpStatus('unchecked'); // 地址变化后重置状态
+                    }}
+                    placeholder="MCP 服务器地址"
+                    className="w-full px-2 py-1 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                  <button
+                    onClick={handleConnectivityTest}
+                    disabled={mcpStatus === 'testing'}
+                    className={`px-3 py-1 rounded-md text-white text-xs transition-colors whitespace-nowrap ${
+                      mcpStatus === 'testing' ? 'bg-gray-400' :
+                      mcpStatus === 'ok' ? 'bg-green-500 hover:bg-green-600' :
+                      mcpStatus === 'error' ? 'bg-red-500 hover:bg-red-600' :
+                      'bg-blue-500 hover:bg-blue-600'
+                    }`}
+                  >
+                    {mcpStatus === 'testing' ? '测试中...' : '连接测试'}
+                  </button>
+                </div>
+              </div>
+
+              {/* 第二部分: 最大工具调用次数滑块 */}
+              <div className="mt-4 md:mt-0">
+                <label htmlFor="maxToolCount" className="flex justify-between"><span>最大工具调用次数</span> <span>{maxToolCalls}</span></label>
+                <input type="range" id="maxToolCount" min="1" max="10" step="1" value={maxToolCalls} onChange={(e) => setMaxToolCalls(parseInt(e.target.value, 10))}
+                  className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"/>
+              </div>
             </div>
           </div>
 

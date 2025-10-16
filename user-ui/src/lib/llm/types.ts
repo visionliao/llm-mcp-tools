@@ -41,7 +41,8 @@ export interface LlmGenerationOptions {
   presencePenalty?: number;  // 表述发散度,默认0，范围-2.0-2.0,值越大，越倾向不同的表达方式，避免概念重复；值越小，越倾向使用重复的概念或叙述，表达更具一致性
   frequencyPenalty?: number; // 词汇丰富度,默认0，范围-2.0-2.0,值越大，用词越丰富多样；值越低，用词更朴实简单
   mcpServerUrl?: string; // mcp服务器地址
-  systemPrompt?: string;
+  systemPrompt?: string; // 系统提示词
+  maxToolCalls?: number; // 最大工具调用次数
 }
 
 /**

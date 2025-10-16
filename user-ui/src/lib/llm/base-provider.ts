@@ -27,7 +27,7 @@ export abstract class BaseChatProvider {
       throw new Error("Message history cannot be empty.");
     }
 
-    const MAX_TOOL_CALLS = 5; // 设置最大工具调用次数以防止无限循环
+    const MAX_TOOL_CALLS = this.config.maxToolCalls ?? 5; // 设置最大工具调用次数以防止无限循环
     let toolCallCount = 0;
     // 创建一个可变的消息历史副本，用于在循环中追加消息
     const currentMessages: ChatMessage[] = [...messages];
@@ -146,7 +146,7 @@ export abstract class BaseChatProvider {
       throw new Error("传入的消息不能为空.");
     }
 
-    const MAX_TOOL_CALLS = 5; // 设置最大工具调用次数以防止无限循环
+    const MAX_TOOL_CALLS = this.config.maxToolCalls ?? 5; // 设置最大工具调用次数以防止无限循环
     let toolCallCount = 0;
     // 创建一个可变的消息历史副本，用于在循环中追加消息
     const currentMessages: ChatMessage[] = [...messages];
