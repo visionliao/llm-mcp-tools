@@ -95,7 +95,7 @@ export class OllamaChatProvider extends BaseChatProvider {
     messages: ChatMessage[],
     signal: AbortSignal,
     tools?: McpToolSchema[]
-  ): Promise<ReadableStream<string>> {
+  ): Promise<ReadableStream<string> | LlmProviderResponse> {
     const options = this.buildOllamaOptions();
 
     // --- 日志记录 ---
@@ -122,28 +122,68 @@ export class OllamaChatProvider extends BaseChatProvider {
         tools: tools,
       });
 
-      // 将 Ollama SDK 的流转换为标准的 Web ReadableStream
-      const stream = new ReadableStream<string>({
-        async start(controller) {
-          // Ollama SDK 的 AbortSignal 处理
-          signal.addEventListener('abort', () => {
-            // SDK 内部可能没有直接的 abort 方法，但这是一种尝试
-            // 实际上超时由 base-provider 的 Promise.race 控制
-            controller.error(new Error("Request was aborted."));
-          });
+      // 1. 获取流的异步迭代器，以便获取第一个块
+      const streamIterator = response[Symbol.asyncIterator]();
+      const firstPartResult = await streamIterator.next();
 
-          for await (const part of response) {
-            const messageChunk = part.message.content;
-            if (messageChunk) {
-              console.log(`ollama大模型流式输出: "${messageChunk}"`);
-              controller.enqueue(messageChunk);
-            }
+      // 2. 如果流一开始就是空的，直接返回一个空的流
+      if (firstPartResult.done) {
+        return new ReadableStream({ start(controller) { controller.close(); } });
+      }
+
+      // 获取第一个有内容的流块
+      const firstPart = firstPartResult.value;
+      const toolCallsInPart = firstPart.message.tool_calls;
+
+      // 3. 检查第一个数据块是否包含工具调用
+      if (toolCallsInPart && toolCallsInPart.length > 0) {
+        // 工具调用
+        console.log('ollama大模型返回工具调用消息:', JSON.stringify(toolCallsInPart, null, 2));
+
+        // 4. 将 Ollama 的工具调用格式转换为 ToolCall[] 格式
+        const toolCalls: ToolCall[] = toolCallsInPart.map((tc, index) => ({
+          id: `${tc.function.name}_${Date.now()}_${index}`, // Ollama 不提供ID，手动创建一个
+          type: 'function',
+          function: {
+            name: tc.function.name,
+            // Ollama 返回的是对象，将其字符串化以符合ToolCall的类型
+            arguments: JSON.stringify(tc.function.arguments),
           }
-          controller.close();
-        },
-      });
+        }));
 
-      return stream;
+        // 5. 返回工具调用的结构化数据
+        return {
+          content: firstPart.message.content || null,
+          tool_calls: toolCalls,
+        };
+      } else {
+        // 普通文本流，表示没有工具调用，或者工具调用完毕这是大模型最终的回复
+        console.log('流式输出第一个数据块是文本，将返回 ReadableStream');
+
+        // 将 Ollama SDK 的流转换为标准的 Web ReadableStream
+        return new ReadableStream<string>({
+          async start(controller) {
+            // 推入第一个块的文本
+            const firstContent = firstPart.message.content;
+            if (firstContent) {
+              console.log('ollama大模型返回文本流:', firstContent);
+              controller.enqueue(firstContent);
+            }
+
+            // 继续处理流中剩余的块
+            while (true) {
+              const nextPartResult = await streamIterator.next();
+              if (nextPartResult.done) break;
+              const nextContent = nextPartResult.value.message.content;
+              if (nextContent) {
+                console.log('ollama大模型返回文本流:', nextContent);
+                controller.enqueue(nextContent);
+              }
+            }
+            controller.close();
+          },
+        });
+      }
     } catch (error: any) {
       console.error("Ollama API Error (Streaming):", error.message);
       throw new Error(`Failed to get response from Ollama: ${error.message}`);
