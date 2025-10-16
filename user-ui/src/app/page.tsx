@@ -50,6 +50,8 @@ CRITICAL RULES:
   );
   // 工具调用最大循环次数
   const [maxToolCalls, setMaxToolCalls] = useState(5); // 默认5次
+  // 用于控制高级设置面板的展开和收起
+  const [isSettingsExpanded, setIsSettingsExpanded] = useState(false); // 默认不展开
 
   // 连接测试处理函数
   const handleConnectivityTest = async () => {
@@ -234,101 +236,125 @@ CRITICAL RULES:
               </div>
             )}
           </div>
-          {/* --- 系统提示词  --- */}
-          <div className="mb-4">
-            <label htmlFor="systemPrompt" className="block text-sm font-medium text-gray-700 mb-1">
-              系统提示词 (System Prompt)
-            </label>
-            <textarea
-              id="systemPrompt"
-              value={systemPrompt}
-              onChange={(e) => setSystemPrompt(e.target.value)}
-              placeholder="输入系统提示词..."
-              rows={5}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y text-sm"
-            />
-          </div>
 
-          {/* --- 在模型选择下方添加参数滑块 --- */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-x-6 gap-y-4 mb-4 p-4 border rounded-lg bg-white text-sm">
-            {/* --- 第一行：创意活跃度 和 思维开放度 和 表述发散度 --- */}
-            <div>
-              <label htmlFor="temperature" className="flex justify-between"><span>创意活跃度 (Temperature)</span> <span>{temperature.toFixed(1)}</span></label>
-              <input type="range" id="temperature" min="0" max="2" step="0.1" value={temperature} onChange={(e) => setTemperature(parseFloat(e.target.value))}
-                className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"/>
+          {/* --- 创建可折叠的高级设置面板 --- */}
+          <div className="mb-4 border border-gray-200 rounded-lg bg-white shadow-sm">
+            {/* --- 面板标题和折叠按钮 --- */}
+            <div
+              className="flex justify-between items-center p-3 cursor-pointer bg-gray-50 rounded-t-lg hover:bg-gray-100"
+              onClick={() => setIsSettingsExpanded(!isSettingsExpanded)}
+            >
+              <h3 className="font-medium text-gray-800">高级参数设置</h3>
+              <span className="text-xl text-gray-500 transform transition-transform duration-300"
+                style={{ transform: isSettingsExpanded ? 'rotate(180deg)' : 'rotate(0deg)' }}
+              >
+                ▼
+              </span>
             </div>
-            <div>
-              <label htmlFor="topP" className="flex justify-between"><span>思维开放度 (Top-P)</span> <span>{topP.toFixed(2)}</span></label>
-              <input type="range" id="topP" min="0" max="1" step="0.05" value={topP} onChange={(e) => setTopP(parseFloat(e.target.value))}
-                className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"/>
-            </div>
-            <div>
-              <label htmlFor="presencePenalty" className="flex justify-between"><span>表述发散度 (Presence Penalty)</span> <span>{presencePenalty.toFixed(1)}</span></label>
-              <input type="range" id="presencePenalty" min="-2" max="1.9" step="0.1" value={presencePenalty} onChange={(e) => setPresencePenalty(parseFloat(e.target.value))}
-                className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"/>
-            </div>
-            {/* --- 第二行：词汇丰富度 和 Max Tokens 和 历史记录条数 --- */}
-            <div>
-              <label htmlFor="frequencyPenalty" className="flex justify-between"><span>词汇丰富度 (Frequency Penalty)</span> <span>{frequencyPenalty.toFixed(1)}</span></label>
-              <input type="range" id="frequencyPenalty" min="-2" max="1.9" step="0.1" value={frequencyPenalty} onChange={(e) => setFrequencyPenalty(parseFloat(e.target.value))}
-                className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"/>
-            </div>
-            <div>
-              <label htmlFor="maxTokens" className="flex justify-between"><span>单次回复限制 (Max Tokens)</span> <span>{maxOutputTokens}</span></label>
-              <input type="range" id="maxTokens" min="256" max="32000" step="256" value={maxOutputTokens} onChange={(e) => setMaxOutputTokens(parseInt(e.target.value, 10))}
-                className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"/>
-            </div>
-            <div>
-              <label htmlFor="historyLength" className="flex justify-between"><span>附加历史消息条数</span> <span>{historyLength}</span></label>
-              <input type="range" id="historyLength" min="0" max="100" step="1" value={historyLength} onChange={(e) => setHistoryLength(parseInt(e.target.value, 10))}
-                className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"/>
-            </div>
-            {/* --- 第三行：启用流式输出 和 MCP服务器地址 和最大工具调用次数限制  --- */}
-            <div className="md:col-span-3 grid grid-cols-1 md:grid-cols-3 gap-x-6 items-center">
-              {/* 第一部分: 流式开关 和 MCP 服务器地址 */}
-              <div className="md:col-span-2 flex items-center space-x-4">
-                <div className="flex items-center">
-                  <input
-                    type="checkbox" id="stream-toggle" checked={isStreamingEnabled}
-                    onChange={(e) => setIsStreamingEnabled(e.target.checked)}
-                    className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500"
-                  />
-                  <label htmlFor="stream-toggle" className="ml-2 font-medium text-gray-900 whitespace-nowrap">
-                    启用流式输出
+
+            {/* --- 可折叠的内容区域 --- */}
+            <div
+              className={`transition-all duration-500 ease-in-out overflow-hidden ${
+                isSettingsExpanded ? 'max-h-[1000px] opacity-100' : 'max-h-0 opacity-0'
+              }`}
+            >
+              <div className="p-4 border-t border-gray-200">
+                {/* --- 系统提示词  --- */}
+                <div className="mb-4">
+                  <label htmlFor="systemPrompt" className="block text-sm font-medium text-gray-700 mb-1">
+                    系统提示词 (System Prompt)
                   </label>
-                </div>
-
-                <div className="flex-grow flex items-center space-x-2">
-                  <input
-                    type="text"
-                    value={mcpServerUrl}
-                    onChange={(e) => {
-                      setMcpServerUrl(e.target.value);
-                      setMcpStatus('unchecked'); // 地址变化后重置状态
-                    }}
-                    placeholder="MCP 服务器地址"
-                    className="w-full px-2 py-1 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  <textarea
+                    id="systemPrompt"
+                    value={systemPrompt}
+                    onChange={(e) => setSystemPrompt(e.target.value)}
+                    placeholder="输入系统提示词..."
+                    rows={5}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y text-sm"
                   />
-                  <button
-                    onClick={handleConnectivityTest}
-                    disabled={mcpStatus === 'testing'}
-                    className={`px-3 py-1 rounded-md text-white text-xs transition-colors whitespace-nowrap ${
-                      mcpStatus === 'testing' ? 'bg-gray-400' :
-                      mcpStatus === 'ok' ? 'bg-green-500 hover:bg-green-600' :
-                      mcpStatus === 'error' ? 'bg-red-500 hover:bg-red-600' :
-                      'bg-blue-500 hover:bg-blue-600'
-                    }`}
-                  >
-                    {mcpStatus === 'testing' ? '测试中...' : '连接测试'}
-                  </button>
                 </div>
-              </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-x-6 gap-y-4 mb-4 p-4 border rounded-lg bg-white text-sm">
+                  {/* --- 第一行：创意活跃度 和 思维开放度 和 表述发散度 --- */}
+                  <div>
+                    <label htmlFor="temperature" className="flex justify-between"><span>创意活跃度 (Temperature)</span> <span>{temperature.toFixed(1)}</span></label>
+                    <input type="range" id="temperature" min="0" max="2" step="0.1" value={temperature} onChange={(e) => setTemperature(parseFloat(e.target.value))}
+                      className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"/>
+                  </div>
+                  <div>
+                    <label htmlFor="topP" className="flex justify-between"><span>思维开放度 (Top-P)</span> <span>{topP.toFixed(2)}</span></label>
+                    <input type="range" id="topP" min="0" max="1" step="0.05" value={topP} onChange={(e) => setTopP(parseFloat(e.target.value))}
+                      className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"/>
+                  </div>
+                  <div>
+                    <label htmlFor="presencePenalty" className="flex justify-between"><span>表述发散度 (Presence Penalty)</span> <span>{presencePenalty.toFixed(1)}</span></label>
+                    <input type="range" id="presencePenalty" min="-2" max="1.9" step="0.1" value={presencePenalty} onChange={(e) => setPresencePenalty(parseFloat(e.target.value))}
+                      className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"/>
+                  </div>
+                  {/* --- 第二行：词汇丰富度 和 Max Tokens 和 历史记录条数 --- */}
+                  <div>
+                    <label htmlFor="frequencyPenalty" className="flex justify-between"><span>词汇丰富度 (Frequency Penalty)</span> <span>{frequencyPenalty.toFixed(1)}</span></label>
+                    <input type="range" id="frequencyPenalty" min="-2" max="1.9" step="0.1" value={frequencyPenalty} onChange={(e) => setFrequencyPenalty(parseFloat(e.target.value))}
+                      className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"/>
+                  </div>
+                  <div>
+                    <label htmlFor="maxTokens" className="flex justify-between"><span>单次回复限制 (Max Tokens)</span> <span>{maxOutputTokens}</span></label>
+                    <input type="range" id="maxTokens" min="256" max="32000" step="256" value={maxOutputTokens} onChange={(e) => setMaxOutputTokens(parseInt(e.target.value, 10))}
+                      className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"/>
+                  </div>
+                  <div>
+                    <label htmlFor="historyLength" className="flex justify-between"><span>附加历史消息条数</span> <span>{historyLength}</span></label>
+                    <input type="range" id="historyLength" min="0" max="100" step="1" value={historyLength} onChange={(e) => setHistoryLength(parseInt(e.target.value, 10))}
+                      className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"/>
+                  </div>
+                  {/* --- 第三行：启用流式输出 和 MCP服务器地址 和最大工具调用次数限制  --- */}
+                  <div className="md:col-span-3 grid grid-cols-1 md:grid-cols-3 gap-x-6 items-center">
+                    {/* 第一部分: 流式开关 和 MCP 服务器地址 */}
+                    <div className="md:col-span-2 flex items-center space-x-4">
+                      <div className="flex items-center">
+                        <input
+                          type="checkbox" id="stream-toggle" checked={isStreamingEnabled}
+                          onChange={(e) => setIsStreamingEnabled(e.target.checked)}
+                          className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500"
+                        />
+                        <label htmlFor="stream-toggle" className="ml-2 font-medium text-gray-900 whitespace-nowrap">
+                          启用流式输出
+                        </label>
+                      </div>
 
-              {/* 第二部分: 最大工具调用次数滑块 */}
-              <div className="mt-4 md:mt-0">
-                <label htmlFor="maxToolCount" className="flex justify-between"><span>最大工具调用次数</span> <span>{maxToolCalls}</span></label>
-                <input type="range" id="maxToolCount" min="1" max="10" step="1" value={maxToolCalls} onChange={(e) => setMaxToolCalls(parseInt(e.target.value, 10))}
-                  className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"/>
+                      <div className="flex-grow flex items-center space-x-2">
+                        <input
+                          type="text"
+                          value={mcpServerUrl}
+                          onChange={(e) => {
+                            setMcpServerUrl(e.target.value);
+                            setMcpStatus('unchecked'); // 地址变化后重置状态
+                          }}
+                          placeholder="MCP 服务器地址"
+                          className="w-full px-2 py-1 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        />
+                        <button
+                          onClick={handleConnectivityTest}
+                          disabled={mcpStatus === 'testing'}
+                          className={`px-3 py-1 rounded-md text-white text-xs transition-colors whitespace-nowrap ${
+                            mcpStatus === 'testing' ? 'bg-gray-400' :
+                            mcpStatus === 'ok' ? 'bg-green-500 hover:bg-green-600' :
+                            mcpStatus === 'error' ? 'bg-red-500 hover:bg-red-600' :
+                            'bg-blue-500 hover:bg-blue-600'
+                          }`}
+                        >
+                          {mcpStatus === 'testing' ? '测试中...' : '连接测试'}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* 第二部分: 最大工具调用次数滑块 */}
+                    <div className="mt-4 md:mt-0">
+                      <label htmlFor="maxToolCount" className="flex justify-between"><span>最大工具调用次数</span> <span>{maxToolCalls}</span></label>
+                      <input type="range" id="maxToolCount" min="1" max="10" step="1" value={maxToolCalls} onChange={(e) => setMaxToolCalls(parseInt(e.target.value, 10))}
+                        className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"/>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
