@@ -16,17 +16,17 @@ export abstract class BaseChatProvider {
   }
 
   /**
-   * 公开的聊天方法，是外部调用的统一入口。
-   * 采用模板方法模式，内部调用子类必须实现的 _generateChatStream 方法。
-   * @param model 要使用的具体模型名称
-   * @param messages 对话历史记录
-   * @returns 返回一个字符串的可读流 (ReadableStream)
+   * 核心的工具调用循环，封装了流式和非流式共享的逻辑。
+   * @param model 模型名称
+   * @param messages 初始消息历史
+   * @param isStreaming 标志位，用于区分调用模式
+   * @returns 根据模式返回流或最终的字符串
    */
-  public async chatStreaming(model: string, messages: ChatMessage[]): Promise<ReadableStream<string>> {
-    if (messages.length === 0) {
-      throw new Error("Message history cannot be empty.");
-    }
-
+  private async _toolCallingLoop(
+    model: string,
+    messages: ChatMessage[],
+    isStreaming: boolean
+  ): Promise<ReadableStream<string> | string> {
     const MAX_TOOL_CALLS = this.config.maxToolCalls ?? 5; // 设置最大工具调用次数以防止无限循环
     let toolCallCount = 0;
     // 创建一个可变的消息历史副本，用于在循环中追加消息
@@ -46,80 +46,99 @@ export abstract class BaseChatProvider {
         }
       }
 
-      // 2. 超时判断
+      // 2. 设置超时
       const controller = new AbortController();
-      // 从实例自身的配置中获取最终确定的超时时间
+      // 从配置中获取用户设置的超时时间，默认60s
       const timeoutMs = this.config.timeoutMs || 60000;
       let timeoutId: NodeJS.Timeout | null = null;
       const timeoutPromise = new Promise<never>((_, reject) => {
         timeoutId = setTimeout(() => {
-          controller.abort(); // 超时后，中止请求
+          controller.abort(); // 超时，中止请求
           reject(new Error(`Request timed out after ${timeoutMs / 1000} seconds.`));
         }, timeoutMs);
       });
 
-      // 3. 获取 LLM 的响应
-      const llmResponsePromise = this._generateChatStream(model, currentMessages, controller.signal, tools);
+      // 3. 根据 isStreaming 标志调用不同的大模型子类实现
+      const llmResponsePromise = isStreaming
+        ? this._generateChatStream(model, currentMessages, controller.signal, tools)
+        : this._generateChatNonStreaming(model, currentMessages, controller.signal, tools);
+
       const llmResponse = await Promise.race([llmResponsePromise, timeoutPromise]);
       // 收到响应后，清除定时器
       if (timeoutId) clearTimeout(timeoutId);
 
-      // 4. 检查 LLM 的响应中是否包含工具调用请求
-      if (llmResponse instanceof ReadableStream) {
-        // 返回的是流，说明没有工具调用，或者工具调用完毕后的大模型最终回复
+      // 4. 根据模式和响应类型判断是否结束循环
+      if (isStreaming && llmResponse instanceof ReadableStream) {
         console.log("接收流式输出文本流，判定流程结束，开始进行最终的异步流式输出。");
-        return llmResponse;
-      } else {
-        // 5. 返回LlmProviderResponse，执行工具调用
-        const llmResponseTool = llmResponse as LlmProviderResponse;
-        const toolCalls = llmResponseTool.tool_calls;
-        // 理论上既然返回的不是流，toolCalls 应该存在，做一个健壮性检查
-        if (!toolCalls || toolCalls.length === 0) {
-          throw new Error("逻辑错误: LLM 返回了非流式工具响应但没有找到工具调用信息。");
-        }
-        console.log(`流式输出本次需要调用的工具数量 ${toolCalls.length} 个.`);
-
-        // 6. 将 assistant 的工具调用请求本身也加入到消息历史中
-        currentMessages.push({
-          role: 'assistant',
-          content: llmResponse.content, // content 可能是 null
-          tool_calls: llmResponse.tool_calls,
-        });
-
-        // 7. 并行执行所有工具调用
-        const toolClient = getToolClientInstance(this.config.mcpServerUrl!);
-        const toolResultPromises = toolCalls.map(async (toolCall) => {
-          const { name, arguments: args } = toolCall.function;
-          try {
-            console.log(`执行工具: ${name} 参数列表: ${args}`);
-            const result = await toolClient.callTool(name, JSON.parse(args))
-            // 8. 将每个工具的执行结果包装成一条 'tool' 消息
-            return {
-              role: 'tool' as const,
-              tool_call_id: toolCall.id,
-              content: typeof result === 'string' ? result : JSON.stringify(result),
-            };
-          } catch (error: any) {
-            console.error(`执行 ${name} 工具错误:`, error);
-            return { // 如果工具执行失败，也返回一条错误信息
-              role: 'tool' as const,
-              tool_call_id: toolCall.id,
-              content: `Error: ${error.message}`,
-            };
-          }
-        });
-
-        // 9. 等待所有工具执行完毕，并将结果追加到消息历史
-        const toolResults = await Promise.all(toolResultPromises);
-        currentMessages.push(...toolResults);
-
-        toolCallCount++;
-        // 循环继续，携带更新后的消息历史再次调用 LLM
-        console.error(`工具循环调用次数: ${toolCallCount}`);
+        return llmResponse; // 流式模式下，收到流就直接返回
       }
+
+      const llmProviderResponse = llmResponse as LlmProviderResponse;
+      const toolCalls = llmProviderResponse.tool_calls;
+      
+      if (!toolCalls || toolCalls.length === 0) {
+        // 两种模式下，没有工具调用都意味着流程结束
+        // 非流式直接返回内容，流式理论上应该在前一步返回流，但作为兜底
+        return llmProviderResponse.content || "";
+      }
+
+      // 5. 执行工具调用
+      console.log(`模式: ${isStreaming ? '流式' : '非流式'} - 本次需要调用的工具数量 ${toolCalls.length} 个.`);
+      // 将 assistant 的工具调用请求本身也加入到消息历史中
+      currentMessages.push({
+        role: 'assistant',
+        content: llmProviderResponse.content, // content 可能是 null
+        tool_calls: toolCalls,
+      });
+
+      // 6. 并行执行所有工具调用
+      const toolClient = getToolClientInstance(this.config.mcpServerUrl!);
+      const toolResultPromises = toolCalls.map(async (toolCall) => {
+        const { name, arguments: args } = toolCall.function;
+        try {
+          console.log(`执行工具: ${name} 参数列表: ${args}`);
+          const result = await toolClient.callTool(name, JSON.parse(args));
+          // 7. 将每个工具的执行结果包装成一条 'tool' 消息
+          return {
+            role: 'tool' as const,
+            tool_call_id: toolCall.id,
+            content: typeof result === 'string' ? result : JSON.stringify(result),
+          };
+        } catch (error: any) {
+          console.error(`执行 ${name} 工具错误:`, error);
+          return { // 如果工具执行失败，也返回一条错误信息给大模型，大模型可以将失败原因作为最终输出返回给前端
+            role: 'tool' as const,
+            tool_call_id: toolCall.id,
+            content: `Error: ${error.message}`,
+          };
+        }
+      });
+
+      // 8. 等待所有工具执行完毕，并将结果追加到消息历史
+      const toolResults = await Promise.all(toolResultPromises);
+      currentMessages.push(...toolResults);
+
+      toolCallCount++;
+      console.error(`工具循环调用次数: ${toolCallCount}`);
     }
-    // 10. 如果循环结束（达到最大调用次数），则抛出错误
+
+    // 9. 循环结束（达到最大调用次数），抛出错误
     throw new Error("已达到单次对话工具最大调用次数限制。");
+  }
+
+  /**
+   * 公开的聊天方法，是外部调用的统一入口。
+   * 采用模板方法模式，内部调用子类必须实现的 _generateChatStream 方法。
+   * @param model 要使用的具体模型名称
+   * @param messages 对话历史记录
+   * @returns 返回一个字符串的可读流 (ReadableStream)
+   */
+  public async chatStreaming(model: string, messages: ChatMessage[]): Promise<ReadableStream<string>> {
+    if (messages.length === 0) {
+      throw new Error("Message history cannot be empty.");
+    }
+    const result = await this._toolCallingLoop(model, messages, true);
+    return result as ReadableStream<string>; // 确认返回类型
   }
 
   /**
@@ -145,86 +164,8 @@ export abstract class BaseChatProvider {
     if (messages.length === 0) {
       throw new Error("传入的消息不能为空.");
     }
-
-    const MAX_TOOL_CALLS = this.config.maxToolCalls ?? 5; // 设置最大工具调用次数以防止无限循环
-    let toolCallCount = 0;
-    // 创建一个可变的消息历史副本，用于在循环中追加消息
-    const currentMessages: ChatMessage[] = [...messages];
-
-    while (toolCallCount < MAX_TOOL_CALLS) {
-      // 1. 如果配置了 mcp，则获取工具列表
-      let tools: McpToolSchema[] | undefined;
-      if (this.config.mcpServerUrl) {
-        try {
-          console.log(`[BaseProvider] MCP server URL found: ${this.config.mcpServerUrl}. Fetching tools...`);
-          const toolClient = getToolClientInstance(this.config.mcpServerUrl);
-          tools = await toolClient.getToolsSchema();
-        } catch (error) {
-          console.error("[BaseProvider] Failed to get tools schema, proceeding without tools.", error);
-        }
-      }
-
-      // 2. 超时判断
-      const controller = new AbortController();
-      const timeoutMs = this.config.timeoutMs || 60000;
-      let timeoutId: NodeJS.Timeout | null = null;
-      const timeoutPromise = new Promise<never>((_, reject) => {
-        timeoutId = setTimeout(() => {
-          controller.abort();
-          reject(new Error(`Request timed out after ${timeoutMs / 1000} seconds.`));
-        }, timeoutMs);
-      });
-
-       // 3. 检查 LLM 的响应中是否包含工具调用请求
-      const llmResponsePromise = this._generateChatNonStreaming(model, currentMessages, controller.signal, tools);
-      const llmResponse = await Promise.race([llmResponsePromise, timeoutPromise]);
-      const toolCalls = llmResponse.tool_calls;
-      if (!toolCalls || toolCalls.length === 0) {
-        // 如果没有工具调用，说明我们得到了最终答案，直接返回
-        return llmResponse.content || "";
-      }
-      console.log(`非流式输出本次需要调用的工具数量 ${toolCalls.length} 个.`);
-
-      // 将 assistant 的工具调用请求本身也加入到消息历史中
-      currentMessages.push({
-        role: 'assistant',
-        content: llmResponse.content, // content 可能是 null
-        tool_calls: llmResponse.tool_calls,
-      });
-
-      // 4. 执行所有请求的工具调用
-      const toolClient = getToolClientInstance(this.config.mcpServerUrl!);
-      const toolResultPromises = toolCalls.map(async (toolCall) => {
-        const { name, arguments: args } = toolCall.function;
-        try {
-          console.log(`执行工具: ${name} 参数列表: ${args}`);
-          const result = await toolClient.callTool(name, JSON.parse(args))
-          // 5. 将每个工具的执行结果包装成一条 'tool' 消息
-          return {
-            role: 'tool' as const,
-            tool_call_id: toolCall.id,
-            content: typeof result === 'string' ? result : JSON.stringify(result),
-          };
-        } catch (error: any) {
-          console.error(`执行 ${name} 工具错误:`, error);
-          return { // 如果工具执行失败，也返回一条错误信息
-            role: 'tool' as const,
-            tool_call_id: toolCall.id,
-            content: `Error: ${error.message}`,
-          };
-        }
-      });
-
-      // 6. 并行执行所有工具调用，并将结果追加到消息历史
-      const toolResults = await Promise.all(toolResultPromises);
-      currentMessages.push(...toolResults);
-
-      toolCallCount++;
-      // 循环继续，携带更新后的消息历史再次调用 LLM
-      console.error(`工具循环调用次数: ${toolCallCount}`);
-    }
-    // 7. 如果循环结束（达到最大调用次数），则抛出错误
-    throw new Error("已经达到单次对话工具最大调用次数限制.");
+    const result = await this._toolCallingLoop(model, messages, false);
+    return result as string; // 确认返回类型
   }
 
   /**

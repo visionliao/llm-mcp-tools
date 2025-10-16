@@ -1,6 +1,14 @@
 // lib/llm/providers/google.ts
 
-import { GoogleGenerativeAI, Content, GenerationConfig, SingleRequestOptions, FunctionDeclaration, Part } from "@google/generative-ai";
+import {
+  GoogleGenerativeAI,
+  Content,
+  GenerationConfig,
+  SingleRequestOptions,
+  FunctionDeclaration,
+  Part,
+  GenerativeModel,
+} from "@google/generative-ai";
 import { BaseChatProvider } from "../base-provider";
 import { ChatMessage, ToolCall, LlmProviderResponse } from "../types";
 import { McpToolSchema } from "../tools/tool-client";
@@ -75,16 +83,29 @@ export class GoogleChatProvider extends BaseChatProvider {
       .filter((msg): msg is Content => msg !== null); // 过滤掉所有 null 的结果
   }
 
-  // 流式输出
-  protected async _generateChatStream(
+  /**
+   * 提取公共代码复用，用于准备 Google API 请求所需的一切。
+   * 职责：封装所有重复的初始化和数据转换逻辑。
+   * @param model 模型名称
+   * @param messages 对话历史
+   * @param tools 可用工具
+   * @returns 包含配置好的模型实例和格式化消息的对象
+   */
+  private _prepareGoogleRequest(
     model: string,
     messages: ChatMessage[],
-    signal: AbortSignal,
-    tools?: McpToolSchema[]
-  ): Promise<ReadableStream<string> | LlmProviderResponse> {
-    // 使用从基类继承的配置初始化 SDK
+    isStream: boolean,
+    tools?: McpToolSchema[],
+  ): {
+    generativeModel: GenerativeModel;
+    formattedMessages: Content[];
+    generationConfig: GenerationConfig; // 返回用于日志记录
+    googleTools: FunctionDeclaration[] | undefined; // 返回用于日志记录
+  } {
+    // 1. 初始化 SDK
     const genAI = new GoogleGenerativeAI(this.config.apiKey);
-    // 从 this.config 中提取并适配 Google SDK 的参数
+
+    // 2. 构建 generationConfig
     const generationConfig: GenerationConfig = {};
     if (this.config.maxOutputTokens !== undefined) generationConfig.maxOutputTokens = this.config.maxOutputTokens;
     if (this.config.temperature !== undefined) generationConfig.temperature = this.config.temperature;
@@ -93,22 +114,26 @@ export class GoogleChatProvider extends BaseChatProvider {
     // if (this.config.presencePenalty !== undefined) generationConfig.presencePenalty = this.config.presencePenalty;
     // if (this.config.frequencyPenalty !== undefined) generationConfig.frequencyPenalty = this.config.frequencyPenalty;
 
-    // 格式化工具以适配 Google API
-    // Google API 需要一个 Tool 数组，每个 Tool 包含一个 functionDeclarations 数组
+    // 3. 格式化工具
     const googleTools = tools?.map(tool => tool.function as FunctionDeclaration);
 
-    // 初始化模型，配置温度、topP、topK、maxOutputTokens等
-    const generativeModel = genAI.getGenerativeModel({ 
+    // 4. 创建模型实例
+    const generativeModel = genAI.getGenerativeModel({
       model,
       generationConfig,
       tools: googleTools ? [{ functionDeclarations: googleTools }] : undefined,
       systemInstruction: this.config.systemPrompt || undefined,
     });
 
-    // 格式化消息
+    // 5. 格式化消息
     const formattedMessages = this.mapMessagesToGoogleFormat(messages);
 
-    console.log('\n--- [LLM Request Log - Streaming] ---');
+    // 6. 打印调试日志
+    if (isStream) {
+      console.log('\n--- [LLM 请求日志 - 流式] ---');
+    } else {
+      console.log('\n--- [LLM 请求日志 - 非流式] ---');
+    }
     console.log(`Timestamp: ${new Date().toISOString()}`);
     console.log('Provider: Google');
     console.log('Model:', model);
@@ -119,6 +144,17 @@ export class GoogleChatProvider extends BaseChatProvider {
     console.log('Final Messages Payload:', JSON.stringify(formattedMessages, null, 2));
     console.log('-------------------------------------\n');
 
+    return { generativeModel, formattedMessages, generationConfig, googleTools };
+  }
+
+  // 流式输出
+  protected async _generateChatStream(
+    model: string,
+    messages: ChatMessage[],
+    signal: AbortSignal,
+    tools?: McpToolSchema[]
+  ): Promise<ReadableStream<string> | LlmProviderResponse> {
+    const { generativeModel, formattedMessages, generationConfig, googleTools } = this._prepareGoogleRequest(model, messages, true, tools);
     // 使用 Promise 来等待流的第一个有效块，并据此决定返回什么
     // 对于google大模型，如果是工具调用信息，会一次性返回所有内容，只有最终的回复才会通过流式块的打字机效果一点点蹦出来结果
     try {
@@ -193,14 +229,7 @@ export class GoogleChatProvider extends BaseChatProvider {
         });
       }
     } catch (error: any) {
-      if (error.name === 'AbortError' || (error.cause && error.cause.name === 'TimeoutError')) {
-        console.error("Google Gemini API request was aborted due to timeout.", { model });
-        // 从基类中获取超时信息，使错误消息更准确
-        const timeoutSeconds = (this.config.timeoutMs || 60000) / 1000;
-        throw new Error(`Request to Google Gemini timed out after ${timeoutSeconds} seconds.`);
-      }
-      console.error("Google Gemini API Error:", error.message);
-      throw new Error(`Failed to get response from Google Gemini: ${error.message}`);
+      this._handleGoogleApiError(error, model);
     }
   }
 
@@ -211,38 +240,7 @@ export class GoogleChatProvider extends BaseChatProvider {
     signal: AbortSignal,
     tools?: McpToolSchema[]
   ): Promise<LlmProviderResponse> {
-    const genAI = new GoogleGenerativeAI(this.config.apiKey);
-    // 从 this.config 中提取并适配 Google SDK 的参数
-    const generationConfig: GenerationConfig = {};
-    if (this.config.maxOutputTokens !== undefined) generationConfig.maxOutputTokens = this.config.maxOutputTokens;
-    if (this.config.temperature !== undefined) generationConfig.temperature = this.config.temperature;
-    if (this.config.topP !== undefined) generationConfig.topP = this.config.topP;
-    // gemini-2.5-xxx 不支持这两个参数
-    // if (this.config.presencePenalty !== undefined) generationConfig.presencePenalty = this.config.presencePenalty;
-    // if (this.config.frequencyPenalty !== undefined) generationConfig.frequencyPenalty = this.config.frequencyPenalty;
-
-    // 格式化工具以适配 Google API
-    // Google API 需要一个 Tool 数组，每个 Tool 包含一个 functionDeclarations 数组
-    const googleTools = tools?.map(tool => tool.function as FunctionDeclaration);
-
-    const generativeModel = genAI.getGenerativeModel({ 
-      model,
-      generationConfig,
-      tools: googleTools ? [{ functionDeclarations: googleTools }] : undefined,
-      systemInstruction: this.config.systemPrompt || undefined,
-    });
-    
-    const formattedMessages = this.mapMessagesToGoogleFormat(messages);
-    console.log('\n--- [大模型请求日志 - 非流式输出] ---');
-    console.log(`Timestamp: ${new Date().toISOString()}`);
-    console.log('Provider: Google');
-    console.log('Model:', model);
-    console.log('系统提示词:', this.config.systemPrompt);
-    console.log('参数配置信息:', JSON.stringify(generationConfig, null, 2));
-    if (googleTools) console.log('可用工具数量: ', googleTools.length);
-    console.log('最大工具调用次数限制:', this.config.maxToolCalls ?? 5);
-    console.log('单次对话工具调用记录:', JSON.stringify(formattedMessages, null, 2));
-    console.log('-------------------------------------\n');
+    const { generativeModel, formattedMessages, generationConfig, googleTools } = this._prepareGoogleRequest(model, messages, false, tools);
 
     try {
       const requestOptions: SingleRequestOptions = {
@@ -286,14 +284,17 @@ export class GoogleChatProvider extends BaseChatProvider {
         tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
       };
     } catch (error: any) {
-      if (error.name === 'AbortError' || (error.cause && error.cause.name === 'TimeoutError')) {
+      this._handleGoogleApiError(error, model)
+    }
+  }
+
+  private _handleGoogleApiError(error: any, model: string): never {
+    if (error.name === 'AbortError' || (error.cause && error.cause.name === 'TimeoutError')) {
         console.error("Google Gemini API request was aborted due to timeout.", { model });
-        // 从基类中获取超时信息，使错误消息更准确
         const timeoutSeconds = (this.config.timeoutMs || 60000) / 1000;
         throw new Error(`Request to Google Gemini timed out after ${timeoutSeconds} seconds.`);
-      }
-      console.error("Google Gemini API Error:", error.message);
-      throw new Error(`Failed to get response from Google Gemini: ${error.message}`);
     }
+    console.error("Google Gemini API Error:", error.message);
+    throw new Error(`Failed to get response from Google Gemini: ${error.message}`);
   }
 }
