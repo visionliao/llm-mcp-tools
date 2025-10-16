@@ -120,90 +120,87 @@ export class GoogleChatProvider extends BaseChatProvider {
 
     // 使用 Promise 来等待流的第一个有效块，并据此决定返回什么
     // 对于google大模型，如果是工具调用信息，会一次性返回所有内容，只有最终的回复才会通过流式块的打字机效果一点点蹦出来结果
-    return new Promise(async (resolve, reject) => {
-      try {
-        // 1. 设定超时参数构造，每次对话请求时的配置
-        const requestOptions: SingleRequestOptions = {
-          signal: signal,
-          timeout: this.config.timeoutMs,
-        };
+    try {
+      // 1. 设定超时参数构造，每次对话请求时的配置
+      const requestOptions: SingleRequestOptions = {
+        signal: signal,
+        timeout: this.config.timeoutMs,
+      };
 
-        // 2. 调用google的流逝输出接口
-        const result = await generativeModel.generateContentStream(
-          { contents: formattedMessages },
-          requestOptions
-        );
+      // 2. 调用google的流逝输出接口
+      const result = await generativeModel.generateContentStream(
+        { contents: formattedMessages },
+        requestOptions
+      );
 
-        // 3. 获取流的异步迭代器，以便可以获取第一个流块
-        const streamIterator = result.stream[Symbol.asyncIterator]();
-        const firstChunkResult = await streamIterator.next();
+      // 3. 获取流的异步迭代器，以便可以获取第一个流块
+      const streamIterator = result.stream[Symbol.asyncIterator]();
+      const firstChunkResult = await streamIterator.next();
 
-        // 如果流一开始就是空的，直接返回一个空的流
-        if (firstChunkResult.done) {
-          resolve(new ReadableStream({ start(controller) { controller.close(); } }));
-          return;
-        }
-
-        // 获取第一个流块
-        const firstChunk = firstChunkResult.value;
-        const functionCalls = firstChunk.functionCalls();
-
-        // 4. 检查第一个有数据的块是否是工具调用信息
-        if (functionCalls && functionCalls.length > 0) {
-          // 是工具调用
-          console.log('google大模型返回工具调用消息:', JSON.stringify(functionCalls, null, 2));
-
-          // 5. 工具格式转换
-          const toolCalls: ToolCall[] = functionCalls.map((fc, index) => ({
-            id: `${fc.name}_${Date.now()}_${index}`,
-            type: 'function',
-            function: {
-              name: fc.name,
-              arguments: JSON.stringify(fc.args)
-            },
-          }));
-
-          // 6. 通过 Promise 的 resolve 返回工具调用的结构化数据
-          resolve({
-            content: firstChunk.text() || null,
-            tool_calls: toolCalls,
-          });
-        } else {
-          // 普通文本流，表示没有工具调用，或者工具调用完毕这是大模型最终的回复
-          console.log('流式输出第一个数据块是文本，将返回 ReadableStream');
-
-          // 7. 将 Google SDK 的流转换为标准的 Web ReadableStream
-          resolve(new ReadableStream<string>({
-            async start(controller) {
-              const firstText = firstChunk.text();
-              if (firstText) {
-                console.log('google大模型返回文本流:', firstText);
-                controller.enqueue(firstText);
-              }
-              while (true) {
-                const nextChunkResult = await streamIterator.next();
-                if (nextChunkResult.done) break;
-                const nextText = nextChunkResult.value.text();
-                if (nextText) {
-                  console.log('google大模型返回文本流:', nextText);
-                  controller.enqueue(nextText);
-                }
-              }
-              controller.close();
-            },
-          }));
-        }
-      } catch (error: any) {
-        if (error.name === 'AbortError' || (error.cause && error.cause.name === 'TimeoutError')) {
-          console.error("Google Gemini API request was aborted due to timeout.", { model });
-          // 从基类中获取超时信息，使错误消息更准确
-          const timeoutSeconds = (this.config.timeoutMs || 60000) / 1000;
-          throw new Error(`Request to Google Gemini timed out after ${timeoutSeconds} seconds.`);
-        }
-        console.error("Google Gemini API Error:", error.message);
-        throw new Error(`Failed to get response from Google Gemini: ${error.message}`);
+      // 如果流一开始就是空的，直接返回一个空的流
+      if (firstChunkResult.done) {
+        return new ReadableStream({ start(controller) { controller.close(); } });
       }
-    });
+
+      // 获取第一个流块
+      const firstChunk = firstChunkResult.value;
+      const functionCalls = firstChunk.functionCalls();
+
+      // 4. 检查第一个有数据的块是否是工具调用信息
+      if (functionCalls && functionCalls.length > 0) {
+        // 是工具调用
+        console.log('google大模型返回工具调用消息:', JSON.stringify(functionCalls, null, 2));
+
+        // 5. 工具格式转换
+        const toolCalls: ToolCall[] = functionCalls.map((fc, index) => ({
+          id: `${fc.name}_${Date.now()}_${index}`,
+          type: 'function',
+          function: {
+            name: fc.name,
+            arguments: JSON.stringify(fc.args)
+          },
+        }));
+
+        // 6. 通过 Promise 的 resolve 返回工具调用的结构化数据
+        return {
+          content: firstChunk.text() || null,
+          tool_calls: toolCalls,
+        };
+      } else {
+        // 普通文本流，表示没有工具调用，或者工具调用完毕这是大模型最终的回复
+        console.log('流式输出第一个数据块是文本，将返回 ReadableStream');
+
+        // 7. 将 Google SDK 的流转换为标准的 Web ReadableStream
+        return new ReadableStream<string>({
+          async start(controller) {
+            const firstText = firstChunk.text();
+            if (firstText) {
+              console.log('google大模型返回文本流:', firstText);
+              controller.enqueue(firstText);
+            }
+            while (true) {
+              const nextChunkResult = await streamIterator.next();
+              if (nextChunkResult.done) break;
+              const nextText = nextChunkResult.value.text();
+              if (nextText) {
+                console.log('google大模型返回文本流:', nextText);
+                controller.enqueue(nextText);
+              }
+            }
+            controller.close();
+          },
+        });
+      }
+    } catch (error: any) {
+      if (error.name === 'AbortError' || (error.cause && error.cause.name === 'TimeoutError')) {
+        console.error("Google Gemini API request was aborted due to timeout.", { model });
+        // 从基类中获取超时信息，使错误消息更准确
+        const timeoutSeconds = (this.config.timeoutMs || 60000) / 1000;
+        throw new Error(`Request to Google Gemini timed out after ${timeoutSeconds} seconds.`);
+      }
+      console.error("Google Gemini API Error:", error.message);
+      throw new Error(`Failed to get response from Google Gemini: ${error.message}`);
+    }
   }
 
   // 非流式输出
