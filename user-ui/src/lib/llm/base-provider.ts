@@ -22,7 +22,7 @@ export abstract class BaseChatProvider {
    * @param messages 对话历史记录
    * @returns 返回一个字符串的可读流 (ReadableStream)
    */
-  public async chatStreaming(model: string, messages: ChatMessage[]): Promise<ReadableStream<string> | LlmProviderResponse> {
+  public async chatStreaming(model: string, messages: ChatMessage[]): Promise<ReadableStream<string>> {
     if (messages.length === 0) {
       throw new Error("Message history cannot be empty.");
     }
