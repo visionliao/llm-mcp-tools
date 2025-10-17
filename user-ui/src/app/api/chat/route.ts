@@ -42,8 +42,13 @@ export async function POST(request: NextRequest) {
         },
       });
     } else {
-      // 如果是字符串，直接返回 JSON 响应
-      return NextResponse.json({ response: result });
+      // 如果是字符串，直接返回 JSON 响应(如果仅返回非流式的数据，用这个简单的方式即可)
+      // return NextResponse.json({ response: result });
+
+      // 处理非流式模式下返回的大模型回复数据(content)和token消耗结构体(TokenUsage)的复合体(NonStreamingResult)对象
+      // result格式：{ content: string, usage: TokenUsage }
+      // 直接序列化为 JSON 返回给前端，前端去解析是聊天内容还是TokenUsage
+      return NextResponse.json(result);
     }
   } catch (error: any) {
     console.error('Chat API error:', error);

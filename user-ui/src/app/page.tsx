@@ -209,10 +209,28 @@ CRITICAL RULES:
         // 流结束后，将完整的回复一次性加入对话历史
         setConversation(prev => [...prev, { role: 'assistant', content: completeResponse }]);
       } else {
-        // 处理非流式响应
+        // 处理非流式响应(仅需要大模型回复可用这个简单方式)
+        // const data = await response.json();
+        // const completeResponse = data.response;
+        // setConversation(prev => [...prev, { role: 'assistant', content: completeResponse }]);
+
+        // 非流式带token消耗统计的流程
+        // 1. 解析返回的 JSON，{ content: string, usage: TokenUsage }
         const data = await response.json();
-        const completeResponse = data.response;
+
+        // 2. 提取聊天内容并更新对话历史
+        const completeResponse = data.content;
         setConversation(prev => [...prev, { role: 'assistant', content: completeResponse }]);
+
+        // 3. 提取token消耗并更新UI
+        if (data.usage) {
+          const usagePayload: TokenUsage = data.usage;
+          console.log("从非流式响应接收到 Token 数据:", usagePayload);
+          // 更新单条消息的 Token 显示
+          setCurrentMessageUsage(usagePayload);
+          // 累加到会话总 Token
+          setTotalSessionTokens(prev => prev + usagePayload.total_tokens);
+        }
       }
     } catch (error: any) {
       console.error("发送消息失败:", error);

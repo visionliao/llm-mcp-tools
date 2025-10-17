@@ -68,7 +68,7 @@ export async function handleChat(
   selectedModel: string,
   messages: ChatMessage[],
   options?: LlmGenerationOptions
-): Promise<ReadableStream<Uint8Array> | string> {
+): Promise<ReadableStream<Uint8Array> | NonStreamingResult> {
   // 在处理任何请求之前，首先确保代理已初始化
   initializeGlobalProxy();
 
@@ -85,7 +85,7 @@ export async function handleChat(
     const result: NonStreamingResult = await chatProvider.chatNonStreaming(model, messages);
     console.log(`[handleChat] 成功接收到非流式用量数据:`, result.usage);
 
-    return result.content;
+    return result;
   } else {
     // return chatProvider.chatStreaming(model, messages);
     // 1. 返回一个包含了大模型最终结果(ReadableStream)和本次token消耗统计(TokenUsage)的结构体(StreamingResult)
