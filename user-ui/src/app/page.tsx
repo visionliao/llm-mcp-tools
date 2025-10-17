@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect, useRef, use } from "react";
-import { LlmGenerationOptions } from "@/lib/llm/types"; 
+import { useState, useEffect, useRef } from "react";
+import { LlmGenerationOptions, TokenUsage, StreamChunk } from "@/lib/llm/types";
 
 // 定义与后端 lib/llm/types.ts 匹配的类型
 interface ChatMessage {
@@ -52,6 +52,10 @@ CRITICAL RULES:
   const [maxToolCalls, setMaxToolCalls] = useState(5); // 默认5次
   // 用于控制高级设置面板的展开和收起
   const [isSettingsExpanded, setIsSettingsExpanded] = useState(false); // 默认不展开
+  // 用于显示【单条】消息的 Token 消耗
+  const [currentMessageUsage, setCurrentMessageUsage] = useState<TokenUsage | null>(null);
+  // 用于累加并显示【当前页面会话】的总 Token 消耗
+  const [totalSessionTokens, setTotalSessionTokens] = useState(0);
 
   // 连接测试处理函数
   const handleConnectivityTest = async () => {
@@ -124,6 +128,8 @@ CRITICAL RULES:
     }
 
     setIsLoading(true);
+    // 在每次发送新消息时，重置上一条消息的 Token 显示
+    setCurrentMessageUsage(null);
     const userMessage: ChatMessage = { role: 'user', content: message };
     // 从完整的对话历史中，只截取用户指定的最后几条，如果为0则将历史消息变为空
     const messagesForApi = historyLength > 0 ? conversation.slice(-historyLength) : [];
@@ -175,9 +181,30 @@ CRITICAL RULES:
           const { value, done } = await reader.read();
           if (done) break;
           const chunk = decoder.decode(value, { stream: true });
-          completeResponse += chunk;
-          // 只更新独立的 streamingResponse state
-          setStreamingResponse(prev => prev + chunk);
+          // SSE 消息以 "data: " 开头，并以 "\n\n" 结尾，我们按这个格式解析
+          const lines = chunk.split('\n\n').filter(line => line.trim().startsWith('data:'));
+          for (const line of lines) {
+            const jsonString = line.replace('data: ', '');
+            try {
+              const parsedChunk: StreamChunk = JSON.parse(jsonString);
+              // 根据数据块的类型，更新不同的 state
+              if (parsedChunk.type === 'text') {
+                const textPayload = parsedChunk.payload;
+                completeResponse += textPayload;
+                // 更新正在流式显示的回复
+                setStreamingResponse(prev => prev + textPayload);
+              } else if (parsedChunk.type === 'usage') {
+                const usagePayload = parsedChunk.payload;
+                console.log("从 SSE 流接收到 Token 数据:", usagePayload);
+                // 更新单条消息的 Token 显示
+                setCurrentMessageUsage(usagePayload);
+                // 累加到会话总 Token
+                setTotalSessionTokens(prev => prev + usagePayload.total_tokens);
+              }
+            } catch (error) {
+              console.error("解析 SSE 数据块失败:", jsonString, error);
+            }
+          }
         }
         // 流结束后，将完整的回复一次性加入对话历史
         setConversation(prev => [...prev, { role: 'assistant', content: completeResponse }]);
@@ -357,6 +384,21 @@ CRITICAL RULES:
                 </div>
               </div>
             </div>
+          </div>
+
+          {/* --- Token 消耗显示 --- */}
+          <div className="mb-4 text-xs text-gray-500 text-center">
+            <span>输入token: </span>
+            <span className="font-medium text-gray-700">{currentMessageUsage?.prompt_tokens ?? '...'}</span>
+            <span className="mx-2">|</span>
+            <span>输出token: </span>
+            <span className="font-medium text-gray-700">{currentMessageUsage?.completion_tokens ?? '...'}</span>
+            <span className="mx-2">|</span>
+            <span>当前消息总token: </span>
+            <span className="font-bold text-gray-800">{currentMessageUsage?.total_tokens ?? '...'}</span>
+            <span className="mx-2">|</span>
+            <span>会话总token: </span>
+            <span className="font-bold text-blue-600">{totalSessionTokens > 0 ? totalSessionTokens : '...'}</span>
           </div>
 
           <div ref={chatContainerRef} className="flex-grow bg-white rounded-lg shadow-inner p-4 overflow-y-auto mb-4 space-y-4">

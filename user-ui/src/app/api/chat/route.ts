@@ -28,9 +28,18 @@ export async function POST(request: NextRequest) {
 
     // 3. 将服务层返回的结果作为 HTTP 响应返回给前端
     if (result instanceof ReadableStream) {
-      // 如果是流
+      // 如果是流(如果仅传递大模型回复的消息流，可以用这个简单的方式)
+      // return new NextResponse(result, {
+      //   headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+      // });
+
+      // SSE 流设置(包含了大模型回复的流和token消耗结构体)
       return new NextResponse(result, {
-        headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+        headers: {
+          'Content-Type': 'text/event-stream; charset=utf-8',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive',
+        },
       });
     } else {
       // 如果是字符串，直接返回 JSON 响应

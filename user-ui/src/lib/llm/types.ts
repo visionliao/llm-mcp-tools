@@ -88,3 +88,15 @@ export interface BaseProviderConfig extends LlmGenerationOptions {
   apiKey: string;
   proxyUrl?: string;
 }
+
+/**
+ * 定义在流中传输的数据块的结构。
+ * 为了将token统计数据也发送到前端，在同一个流中混合发送文本内容和结构化的token消耗元数据。
+ */
+export type StreamChunk = {
+  type: 'text';
+  payload: string; // 聊天文本内容
+} | {
+  type: 'usage';
+  payload: TokenUsage; // Token 用量数据
+};

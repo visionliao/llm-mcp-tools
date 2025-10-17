@@ -1,7 +1,7 @@
 // lib/llm/model-service.ts
 
 import { createChatProvider } from './model-factory';
-import { ChatMessage, LlmGenerationOptions, StreamingResult, NonStreamingResult } from './types';
+import { ChatMessage, LlmGenerationOptions, StreamingResult, NonStreamingResult, StreamChunk } from './types';
 import { ProxyAgent, setGlobalDispatcher } from 'undici';
 
 // 使用一个模块级别的变量确保代理设置只执行一次
@@ -68,7 +68,7 @@ export async function handleChat(
   selectedModel: string,
   messages: ChatMessage[],
   options?: LlmGenerationOptions
-): Promise<ReadableStream<string> | string> {
+): Promise<ReadableStream<Uint8Array> | string> {
   // 在处理任何请求之前，首先确保代理已初始化
   initializeGlobalProxy();
 
@@ -88,20 +88,48 @@ export async function handleChat(
     return result.content;
   } else {
     // return chatProvider.chatStreaming(model, messages);
-    // 返回一个包含了大模型最终结果(ReadableStream)和本次token消耗统计(TokenUsage)的结构体(StreamingResult)
+    // 1. 返回一个包含了大模型最终结果(ReadableStream)和本次token消耗统计(TokenUsage)的结构体(StreamingResult)
     const result: StreamingResult = await chatProvider.chatStreaming(model, messages);
 
-    // 在这里，您可以访问 finalUsagePromise 并决定如何处理它。
-    // 例如，您可以等待它，然后将结果存入数据库或缓存。
-    // 现在，我们只把它打印出来，证明数据已经成功传递到了顶层。
-    result.finalUsagePromise.then(usage => {
-      if (usage) {
-        console.log(`[handleChat] 成功接收到最终的流式用量数据:`, usage);
-        // 在这里可以添加数据库记录等操作
-      }
-    });
+    // 2. 创建一个新的 TransformStream 来处理和转换数据为字节流
+    const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
 
-    // *** 最重要的是，我们只将 stream 部分返回给 Next.js 的响应体 ***
-    return result.stream;
+    const writer = writable.getWriter();
+    const reader = result.stream.getReader(); // 这是原始的文本流 reader
+    const encoder = new TextEncoder();
+
+    // 3. 异步地将原始文本流转换为包含 StreamChunk 的 SSE 字节流
+    (async () => {
+      try {
+        // 首先处理文本流
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          const textChunk: StreamChunk = { type: 'text', payload: value };
+          await writer.write(encoder.encode(toSSE(textChunk)));
+        }
+
+        // 文本流结束后，等待 finalUsagePromise
+        const finalUsage = await result.finalUsagePromise;
+        if (finalUsage) {
+          console.log(`[handleChat] 将最终用量数据注入 SSE 流中:`, finalUsage);
+          const usageChunk: StreamChunk = { type: 'usage', payload: finalUsage };
+          await writer.write(encoder.encode(toSSE(usageChunk)));
+        }
+      } catch (e) {
+        console.error("在 SSE 流转换中发生错误:", e);
+        writer.abort(e);
+      } finally {
+        writer.close();
+      }
+    })();
+
+    // 4. 返回包含了大模型回复流和token消耗结构数据的流
+    return readable;
   }
+}
+
+// 流式输出中，将模型回复流和token消耗结构数据格式化为 SSE 字符串
+function toSSE(chunk: StreamChunk): string {
+  return `data: ${JSON.stringify(chunk)}\n\n`;
 }
