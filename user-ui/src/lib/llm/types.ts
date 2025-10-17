@@ -12,10 +12,37 @@ export interface ToolCall {
   };
 }
 
-// 定义从 Provider 返回的复杂响应结构
+/**
+ * 定义 Token 使用情况的结构
+ */
+export interface TokenUsage {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+}
+
+
+// 定义从 Provider 返回的复杂响应结构，可能是字符串，可能是工具调用信息
 export interface LlmProviderResponse {
   content: string | null;
   tool_calls?: ToolCall[];
+  usage?: TokenUsage;
+}
+
+/**
+ * 为流式响应定义的标准容器接口。
+ * 这个结构允许同时传递立即可用的数据流和在流结束后才能获取的token消耗信息。
+ */
+export interface StreamingResult {
+  /**
+   * 大模型返回的最终结果
+   */
+  stream: ReadableStream<string>;
+  /**
+   * 一个在流完全结束后才会兑现的 Promise。
+   * 本次对话所消耗的 Token 总量(包含工具调用等)。
+   */
+  finalUsagePromise: Promise<TokenUsage | undefined>;
 }
 
 /**

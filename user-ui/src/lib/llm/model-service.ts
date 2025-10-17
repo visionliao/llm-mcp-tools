@@ -84,6 +84,21 @@ export async function handleChat(
   if (options?.stream === false) {
     return chatProvider.chatNonStreaming(model, messages);
   } else {
-    return chatProvider.chatStreaming(model, messages);
+    // return chatProvider.chatStreaming(model, messages);
+    // 返回一个包含了大模型最终结果(ReadableStream)和本次token消耗统计(TokenUsage)的结构体(StreamingResult)
+    const result = await chatProvider.chatStreaming(model, messages);
+
+    // 在这里，您可以访问 finalUsagePromise 并决定如何处理它。
+    // 例如，您可以等待它，然后将结果存入数据库或缓存。
+    // 现在，我们只把它打印出来，证明数据已经成功传递到了顶层。
+    result.finalUsagePromise.then(usage => {
+      if (usage) {
+        // console.log(`[handleChat] 成功接收到最终的流式用量数据:`, usage);
+        // 在这里可以添加数据库记录等操作
+      }
+    });
+
+    // *** 最重要的是，我们只将 stream 部分返回给 Next.js 的响应体 ***
+    return result.stream;
   }
 }

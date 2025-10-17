@@ -8,9 +8,11 @@ import {
   FunctionDeclaration,
   Part,
   GenerativeModel,
+  GenerateContentResult,
+  GenerateContentStreamResult,
 } from "@google/generative-ai";
 import { BaseChatProvider } from "../base-provider";
-import { ChatMessage, ToolCall, LlmProviderResponse } from "../types";
+import { ChatMessage, ToolCall, LlmProviderResponse, TokenUsage, StreamingResult } from "../types";
 import { McpToolSchema } from "../tools/tool-client";
 
 export class GoogleChatProvider extends BaseChatProvider {
@@ -153,7 +155,7 @@ export class GoogleChatProvider extends BaseChatProvider {
     messages: ChatMessage[],
     signal: AbortSignal,
     tools?: McpToolSchema[]
-  ): Promise<ReadableStream<string> | LlmProviderResponse> {
+  ): Promise<StreamingResult | LlmProviderResponse> {
     const { generativeModel, formattedMessages, generationConfig, googleTools } = this._prepareGoogleRequest(model, messages, true, tools);
     // 使用 Promise 来等待流的第一个有效块，并据此决定返回什么
     // 对于google大模型，如果是工具调用信息，会一次性返回所有内容，只有最终的回复才会通过流式块的打字机效果一点点蹦出来结果
@@ -165,7 +167,7 @@ export class GoogleChatProvider extends BaseChatProvider {
       };
 
       // 2. 调用google的流逝输出接口
-      const result = await generativeModel.generateContentStream(
+      const result: GenerateContentStreamResult = await generativeModel.generateContentStream(
         { contents: formattedMessages },
         requestOptions
       );
@@ -176,7 +178,15 @@ export class GoogleChatProvider extends BaseChatProvider {
 
       // 如果流一开始就是空的，直接返回一个空的流
       if (firstChunkResult.done) {
-        return new ReadableStream({ start(controller) { controller.close(); } });
+        // 如果流为空，依然尝试获取最终响应，以防有错误或元数据
+        const finalResponse = await result.response;
+        const usage: TokenUsage | undefined = finalResponse.usageMetadata && {
+            prompt_tokens: finalResponse.usageMetadata.promptTokenCount,
+            completion_tokens: finalResponse.usageMetadata.candidatesTokenCount,
+            total_tokens: finalResponse.usageMetadata.totalTokenCount,
+        };
+        //return new ReadableStream({ start(controller) { controller.close(); } });
+        return { content: null, tool_calls: undefined, usage };
       }
 
       // 获取第一个流块
@@ -187,6 +197,13 @@ export class GoogleChatProvider extends BaseChatProvider {
       if (functionCalls && functionCalls.length > 0) {
         // 是工具调用
         console.log('google大模型返回工具调用消息:', JSON.stringify(functionCalls, null, 2));
+        const finalResponse = await result.response;
+        // 提取本次工具调用的token消耗，在base-provider中进行整合累加
+        const usage: TokenUsage | undefined = finalResponse.usageMetadata && {
+            prompt_tokens: finalResponse.usageMetadata.promptTokenCount,
+            completion_tokens: finalResponse.usageMetadata.candidatesTokenCount,
+            total_tokens: finalResponse.usageMetadata.totalTokenCount,
+        };
 
         // 5. 工具格式转换
         const toolCalls: ToolCall[] = functionCalls.map((fc, index) => ({
@@ -202,13 +219,14 @@ export class GoogleChatProvider extends BaseChatProvider {
         return {
           content: firstChunk.text() || null,
           tool_calls: toolCalls,
+          usage: usage,
         };
       } else {
         // 普通文本流，表示没有工具调用，或者工具调用完毕这是大模型最终的回复
         console.log('流式输出第一个数据块是文本，将返回 ReadableStream');
 
         // 7. 将 Google SDK 的流转换为标准的 Web ReadableStream
-        return new ReadableStream<string>({
+        const stream = new ReadableStream<string>({
           async start(controller) {
             const firstText = firstChunk.text();
             if (firstText) {
@@ -227,6 +245,31 @@ export class GoogleChatProvider extends BaseChatProvider {
             controller.close();
           },
         });
+
+        // 创建一个 Promise 管道，当最终答复结束后这个管道才会输出token用量信息
+        const finalUsagePromise: Promise<TokenUsage | undefined> = new Promise(async (resolve) => {
+          try {
+            const finalResponse = await result.response;
+            if (finalResponse.usageMetadata) {
+              resolve({
+                prompt_tokens: finalResponse.usageMetadata.promptTokenCount,
+                completion_tokens: finalResponse.usageMetadata.candidatesTokenCount,
+                total_tokens: finalResponse.usageMetadata.totalTokenCount,
+              });
+            } else {
+              resolve(undefined);
+            }
+          } catch (e) {
+            console.error("在 finalUsagePromise 中获取用量数据失败:", e);
+            resolve(undefined);
+          }
+        });
+
+        // 大模型回复和token消耗信息包装在 StreamingResult 对象中并返回
+        return {
+          stream: stream,
+          finalUsagePromise: finalUsagePromise
+        };
       }
     } catch (error: any) {
       this._handleGoogleApiError(error, model);
@@ -249,13 +292,21 @@ export class GoogleChatProvider extends BaseChatProvider {
       };
 
       // 调用 SDK 的非流式 API: generateContent
-      const result = await generativeModel.generateContent(
+      const result: GenerateContentResult = await generativeModel.generateContent(
         { contents: formattedMessages },
         requestOptions
       );
 
       const response = result.response;
       console.log('google大模型响应非流式输出:', JSON.stringify(response, null, 2));
+
+      // 从响应中提取token消耗信息
+      const usage: TokenUsage | undefined = response.usageMetadata && {
+          prompt_tokens: response.usageMetadata.promptTokenCount,
+          completion_tokens: response.usageMetadata.candidatesTokenCount,
+          total_tokens: response.usageMetadata.totalTokenCount,
+      };
+
       // 从 Google 的响应中安全地提取文本内容和工具调用
       const candidates = response.candidates;
       if (!candidates || candidates.length === 0) {
@@ -282,6 +333,7 @@ export class GoogleChatProvider extends BaseChatProvider {
       return {
         content: textContent,
         tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
+        usage: usage,
       };
     } catch (error: any) {
       this._handleGoogleApiError(error, model)
