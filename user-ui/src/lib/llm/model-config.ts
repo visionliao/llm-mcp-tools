@@ -25,7 +25,7 @@ export function getProviderConfig(providerName: string): BaseProviderConfig {
   if (!apiKey || apiKey.trim() === '') {
     throw new Error(
       `Configuration error: API key for ${providerName} is missing. ` +
-      `Please set the NEXT_PUBLIC_${upperCaseProvider}_API_KEY environment variable.`
+      `Please set the ${upperCaseProvider}_API_KEY environment variable.`
     );
   }
 

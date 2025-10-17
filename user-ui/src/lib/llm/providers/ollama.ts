@@ -129,6 +129,7 @@ export class OllamaChatProvider extends BaseChatProvider {
         stream: true,
         options: options,
         tools: tools,
+        think: false, // 关闭思考过程的输出
       });
 
       // 1. 获取流的异步迭代器，以便获取第一个块
@@ -151,12 +152,25 @@ export class OllamaChatProvider extends BaseChatProvider {
         // 工具调用
         console.log('ollama大模型返回工具调用消息:', JSON.stringify(toolCallsInPart, null, 2));
 
-        // 需要消耗完整个流，以获取最后一个数据块中的 Token 统计
+        // 从 firstPart 拿到了所有的 tool_calls。
+        // 所以只需要消耗掉流的剩余部分，从而得到最后的token数据。
         let finalResponse: ChatResponse = firstPart;
-        for await (const part of response) {
-          finalResponse = part;
+        while (true) {
+          const nextPartResult = await streamIterator.next();
+          if (nextPartResult.done) {
+            // 如果 nextPartResult.done 为 true, 它的 value (即最后一个块) 是 undefined。
+            // 所以最后一个有效的块是上一次循环的 finalResponse。
+            break;
+          }
+          finalResponse = nextPartResult.value;
         }
 
+        // 确保拿到最后一个 done: true 的块
+        if (!finalResponse.done) {
+            console.warn("[Ollama Provider] Stream ended unexpectedly without a 'done' message.");
+        }
+
+        // 从最后一个数据块中提取token消耗数据
         const usage: TokenUsage = {
           prompt_tokens: finalResponse.prompt_eval_count ?? 0,
           completion_tokens: finalResponse.eval_count ?? 0,
@@ -164,7 +178,7 @@ export class OllamaChatProvider extends BaseChatProvider {
         };
 
         // 4. 将 Ollama 的工具调用格式转换为 ToolCall[] 格式
-        const toolCalls: ToolCall[] = (finalResponse.message.tool_calls ?? []).map((tc, index) => ({
+        const toolCalls: ToolCall[] = toolCallsInPart.map((tc, index) => ({
           id: `${tc.function.name}_${Date.now()}_${index}`, // Ollama 不提供ID，手动创建一个
           type: 'function',
           function: {
@@ -209,6 +223,7 @@ export class OllamaChatProvider extends BaseChatProvider {
               for await (const part of response) {
                   finalResponse = part; // 始终保留最后一个 part
                   if (part.message.content) {
+                      console.log('ollama大模型返回文本流:', part.message.content);
                       controller.enqueue(part.message.content);
                   }
               }
@@ -277,6 +292,7 @@ export class OllamaChatProvider extends BaseChatProvider {
         stream: false,
         options: options,
         tools: tools,
+        think: false, // 关闭思考过程的输出
       });
 
       const responseMessage = response.message;
