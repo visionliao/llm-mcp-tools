@@ -30,8 +30,17 @@ export interface LlmProviderResponse {
 }
 
 /**
+ * 为非流式响应定义的标准返回接口。
+ * 这个结构同时携带最终的聊天内容和完整的 Token 消耗统计。
+ */
+export interface NonStreamingResult {
+  content: string;
+  usage: TokenUsage;
+}
+
+/**
  * 为流式响应定义的标准容器接口。
- * 这个结构允许同时传递立即可用的数据流和在流结束后才能获取的token消耗信息。
+ * 这个结构同时传递大模型回复的数据流和在流结束后才能获取的token消耗信息。
  */
 export interface StreamingResult {
   /**

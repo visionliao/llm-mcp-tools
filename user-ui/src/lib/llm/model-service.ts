@@ -1,7 +1,7 @@
 // lib/llm/model-service.ts
 
 import { createChatProvider } from './model-factory';
-import { ChatMessage, LlmGenerationOptions } from './types';
+import { ChatMessage, LlmGenerationOptions, StreamingResult, NonStreamingResult } from './types';
 import { ProxyAgent, setGlobalDispatcher } from 'undici';
 
 // 使用一个模块级别的变量确保代理设置只执行一次
@@ -82,18 +82,21 @@ export async function handleChat(
   // 如果 stream 选项为 false，则调用非流式方法。
   // 默认（undefined）或 true 时，调用流式方法。
   if (options?.stream === false) {
-    return chatProvider.chatNonStreaming(model, messages);
+    const result: NonStreamingResult = await chatProvider.chatNonStreaming(model, messages);
+    console.log(`[handleChat] 成功接收到非流式用量数据:`, result.usage);
+
+    return result.content;
   } else {
     // return chatProvider.chatStreaming(model, messages);
     // 返回一个包含了大模型最终结果(ReadableStream)和本次token消耗统计(TokenUsage)的结构体(StreamingResult)
-    const result = await chatProvider.chatStreaming(model, messages);
+    const result: StreamingResult = await chatProvider.chatStreaming(model, messages);
 
     // 在这里，您可以访问 finalUsagePromise 并决定如何处理它。
     // 例如，您可以等待它，然后将结果存入数据库或缓存。
     // 现在，我们只把它打印出来，证明数据已经成功传递到了顶层。
     result.finalUsagePromise.then(usage => {
       if (usage) {
-        // console.log(`[handleChat] 成功接收到最终的流式用量数据:`, usage);
+        console.log(`[handleChat] 成功接收到最终的流式用量数据:`, usage);
         // 在这里可以添加数据库记录等操作
       }
     });

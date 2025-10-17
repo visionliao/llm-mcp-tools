@@ -1,6 +1,13 @@
 // lib/llm/model-provider.ts
 
-import { ChatMessage, BaseProviderConfig, LlmProviderResponse, TokenUsage, StreamingResult } from './types';
+import {
+  ChatMessage,
+  BaseProviderConfig,
+  LlmProviderResponse,
+  TokenUsage,
+  StreamingResult,
+  NonStreamingResult
+} from './types';
 import { getToolClientInstance } from './tools/tool-client-manager';
 import { McpToolSchema } from './tools/tool-client';
 
@@ -20,13 +27,14 @@ export abstract class BaseChatProvider {
    * @param model 模型名称
    * @param messages 初始消息历史
    * @param isStreaming 标志位，用于区分调用模式
-   * @returns 一个包含了大模型最终结果(ReadableStream)和本次token消耗统计(TokenUsage)的结构体(StreamingResult)或者最终的字符串
+   * @returns 一个包含了流式输出模式下大模型最终结果(ReadableStream)和本次token消耗统计(TokenUsage)的结构体(StreamingResult)
+   *      或者 非流式输出模式下包含文本字符串(content)和本次token消耗统计(TokenUsage)的结构体(NonStreamingResult)
    */
   private async _toolCallingLoop(
     model: string,
     messages: ChatMessage[],
     isStreaming: boolean
-  ): Promise<StreamingResult | string> {
+  ): Promise<StreamingResult | NonStreamingResult> {
     const MAX_TOOL_CALLS = this.config.maxToolCalls ?? 5; // 设置最大工具调用次数以防止无限循环
     let toolCallCount = 0;
     // 创建一个可变的消息历史副本，用于在循环中追加消息
@@ -85,23 +93,36 @@ export abstract class BaseChatProvider {
 
         // 异步地等待最终回复的token数据生成，在流式输出中，最终答案是一字一字蹦出来，等这个结束后才能拿到token消耗的信息。
         // 对于流式输出，这里是最终大模型回复的那次token消耗
-        (async () => {
+        const finalAccumulationPromise: Promise<TokenUsage> = new Promise(async (resolve, reject) => {
           try {
-            const finalUsage = await streamingResult.finalUsagePromise;
-            if (finalUsage) {
-              totalUsage.prompt_tokens += finalUsage.prompt_tokens;
-              totalUsage.completion_tokens += finalUsage.completion_tokens;
-              totalUsage.total_tokens += finalUsage.total_tokens;
-              console.log("[TokenCount] 所有步骤完成后的最终总用量:", JSON.stringify(totalUsage, null, 2));
+            // 等待原始的、只包含最后一步用量的 Promise 完成
+            const finalStepUsage = await streamingResult.finalUsagePromise;
+
+            // 将最后一步的用量，累加到已经包含所有工具调用步骤的 totalUsage 中
+            if (finalStepUsage) {
+              totalUsage.prompt_tokens += finalStepUsage.prompt_tokens;
+              totalUsage.completion_tokens += finalStepUsage.completion_tokens;
+              totalUsage.total_tokens += finalStepUsage.total_tokens;
             }
+
+            // 在控制台打印最终的、完整的总账单（用于调试）
+            console.log("[TokenCount] 所有步骤完成后的最终总用量:", JSON.stringify(totalUsage, null, 2));
+
+            // 将包含了所有步骤总和的、最终的 totalUsage 对象，作为这个新 Promise 的结果
+            resolve(totalUsage);
           } catch (e) {
-            // 即使获取最终用量失败，也不应使整个应用崩溃
-            console.error("Failed to accumulate final stream usage:", e);
+            // 如果原始的 finalUsagePromise 失败，或者累加过程中出现任何错误
+            console.error("[TokenCount] 在累加最终流式用量时发生错误:", e);
+            reject(new Error("Failed to accumulate final token usage."));
           }
-        })();
+        });
 
         // 立即返回 streamingResult 的通道，相当于一个引用地址，使用者实时从这个地址获取流数据。
-        return streamingResult;
+        // 并且等待最终token统计结果数据，然后进行累加的最终token总消耗结果
+        return {
+          stream: streamingResult.stream,
+          finalUsagePromise: finalAccumulationPromise
+        };
       }
 
       const llmProviderResponse = llmResponse as LlmProviderResponse;
@@ -121,7 +142,11 @@ export abstract class BaseChatProvider {
       if (!toolCalls || toolCalls.length === 0) {
         // 两种模式下，没有工具调用都意味着流程结束
         // 非流式直接返回内容，流式理论上应该在前一步返回流，但作为兜底
-        return llmProviderResponse.content || "";
+        // return llmProviderResponse.content || "";
+        return {
+          content: llmProviderResponse.content || "",
+          usage: totalUsage,
+        };
       }
 
       // 5. 执行工具调用
@@ -201,14 +226,14 @@ export abstract class BaseChatProvider {
   /**
    * 非流式聊天方法。
    * 内置超时逻辑。
-   * @returns 返回一个包含完整回复内容的字符串
+   * @returns 返回一个包含完整回复内容的字符串(content)和token消耗统计(TokenUsage)的结构体(NonStreamingResult)
    */
-  public async chatNonStreaming(model: string, messages: ChatMessage[]): Promise<string> {
+  public async chatNonStreaming(model: string, messages: ChatMessage[]): Promise<NonStreamingResult> {
     if (messages.length === 0) {
       throw new Error("传入的消息不能为空.");
     }
     const result = await this._toolCallingLoop(model, messages, false);
-    return result as string; // 确认返回类型
+    return result as NonStreamingResult; // 确认返回类型
   }
 
   /**
