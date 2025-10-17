@@ -253,7 +253,7 @@ CRITICAL RULES:
   return (
     <div className="flex flex-col h-screen bg-gray-50">
       <header className="p-4 border-b bg-white shadow-sm">
-        <h1 className="text-xl font-bold text-center text-gray-800">MCP 客户端</h1>
+        <h1 className="text-xl font-bold text-center text-gray-800">矩乘 AI studio</h1>
       </header>
       
       <main className="flex-grow p-4 overflow-hidden">
