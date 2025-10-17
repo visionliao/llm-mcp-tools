@@ -1,8 +1,16 @@
 // lib/llm/providers/ollama.ts
 
-import { Ollama, type Message } from 'ollama';
+import { Ollama, type Message, type ChatResponse } from 'ollama';
 import { BaseChatProvider } from '../base-provider';
-import { BaseProviderConfig, ChatMessage, LlmGenerationOptions, ToolCall, LlmProviderResponse } from '../types';
+import {
+  BaseProviderConfig,
+  ChatMessage,
+  LlmGenerationOptions,
+  ToolCall,
+  LlmProviderResponse,
+  StreamingResult,
+  TokenUsage
+} from '../types';
 import { McpToolSchema } from '../tools/tool-client';
 
 // Ollama API 使用不同的参数名，我们需要一个映射
@@ -95,7 +103,7 @@ export class OllamaChatProvider extends BaseChatProvider {
     messages: ChatMessage[],
     signal: AbortSignal,
     tools?: McpToolSchema[]
-  ): Promise<ReadableStream<string> | LlmProviderResponse> {
+  ): Promise<StreamingResult | LlmProviderResponse> {
     const options = this.buildOllamaOptions();
 
     // --- 日志记录 ---
@@ -129,7 +137,9 @@ export class OllamaChatProvider extends BaseChatProvider {
 
       // 2. 如果流一开始就是空的，直接返回一个空的流
       if (firstPartResult.done) {
-        return new ReadableStream({ start(controller) { controller.close(); } });
+        // 如果流为空
+        // Ollama SDK 在空流时不会返回最终的 ChatResponse，所以返回一个空的用量。
+        return { content: null, tool_calls: undefined, usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 } };
       }
 
       // 获取第一个有内容的流块
@@ -141,49 +151,93 @@ export class OllamaChatProvider extends BaseChatProvider {
         // 工具调用
         console.log('ollama大模型返回工具调用消息:', JSON.stringify(toolCallsInPart, null, 2));
 
+        // 需要消耗完整个流，以获取最后一个数据块中的 Token 统计
+        let finalResponse: ChatResponse = firstPart;
+        for await (const part of response) {
+          finalResponse = part;
+        }
+
+        const usage: TokenUsage = {
+          prompt_tokens: finalResponse.prompt_eval_count ?? 0,
+          completion_tokens: finalResponse.eval_count ?? 0,
+          total_tokens: (finalResponse.prompt_eval_count ?? 0) + (finalResponse.eval_count ?? 0),
+        };
+
         // 4. 将 Ollama 的工具调用格式转换为 ToolCall[] 格式
-        const toolCalls: ToolCall[] = toolCallsInPart.map((tc, index) => ({
+        const toolCalls: ToolCall[] = (finalResponse.message.tool_calls ?? []).map((tc, index) => ({
           id: `${tc.function.name}_${Date.now()}_${index}`, // Ollama 不提供ID，手动创建一个
           type: 'function',
           function: {
             name: tc.function.name,
             // Ollama 返回的是对象，将其字符串化以符合ToolCall的类型
-            arguments: JSON.stringify(tc.function.arguments),
+            arguments: JSON.stringify(tc.function.arguments)
           }
         }));
 
-        // 5. 返回工具调用的结构化数据
+        // 5. 返回工具调用的结构化数据和本地工具调用的token用量
         return {
-          content: firstPart.message.content || null,
+          content: finalResponse.message.content || null,
           tool_calls: toolCalls,
+          usage: usage,
         };
       } else {
         // 普通文本流，表示没有工具调用，或者工具调用完毕这是大模型最终的回复
         console.log('流式输出第一个数据块是文本，将返回 ReadableStream');
 
-        // 将 Ollama SDK 的流转换为标准的 Web ReadableStream
-        return new ReadableStream<string>({
-          async start(controller) {
-            // 推入第一个块的文本
-            const firstContent = firstPart.message.content;
-            if (firstContent) {
-              console.log('ollama大模型返回文本流:', firstContent);
-              controller.enqueue(firstContent);
-            }
+        // finalUsagePromise 将在流结束后解析
+        let finalUsageResolver: (usage: TokenUsage | undefined) => void;
+        const finalUsagePromise = new Promise<TokenUsage | undefined>(resolve => {
+          finalUsageResolver = resolve;
+        });
 
-            // 继续处理流中剩余的块
-            while (true) {
-              const nextPartResult = await streamIterator.next();
-              if (nextPartResult.done) break;
-              const nextContent = nextPartResult.value.message.content;
-              if (nextContent) {
-                console.log('ollama大模型返回文本流:', nextContent);
-                controller.enqueue(nextContent);
+        // 将 Ollama SDK 的流转换为标准的 Web ReadableStream
+        const stream = new ReadableStream<string>({
+          async start(controller) {
+            try {
+              // 推入第一个块的文本
+              const firstContent = firstPart.message.content;
+              if (firstContent) {
+                console.log('ollama大模型返回文本流:', firstContent);
+                controller.enqueue(firstContent);
               }
+
+              // 继续处理流中剩余的块
+              let finalResponse: ChatResponse = firstPart;
+              // 注意：不能直接 for await...next()，因为 firstPart 已经被消费
+              // 所以重新创建一个迭代器来处理剩余部分 (或者可以直接在循环中处理 firstPart)
+              // 直接在循环中处理
+              for await (const part of response) {
+                  finalResponse = part; // 始终保留最后一个 part
+                  if (part.message.content) {
+                      controller.enqueue(part.message.content);
+                  }
+              }
+
+              // 流结束时，`finalResponse` 就是那个 done: true 的块
+              if (finalResponse.done) {
+                const usage: TokenUsage = {
+                  prompt_tokens: finalResponse.prompt_eval_count ?? 0,
+                  completion_tokens: finalResponse.eval_count ?? 0,
+                  total_tokens: (finalResponse.prompt_eval_count ?? 0) + (finalResponse.eval_count ?? 0),
+                };
+                finalUsageResolver(usage);
+              } else {
+                finalUsageResolver(undefined); // 异常情况
+              }
+            } catch (e) {
+                console.error("Ollama stream processing error:", e);
+                finalUsageResolver(undefined);
+                controller.error(e);
+            } finally {
+                controller.close();
             }
-            controller.close();
           },
         });
+        // 返回大模型回复的文本流和token消耗统计结构体
+        return {
+          stream: stream,
+          finalUsagePromise: finalUsagePromise
+        };
       }
     } catch (error: any) {
       console.error("Ollama API Error (Streaming):", error.message);
@@ -227,6 +281,15 @@ export class OllamaChatProvider extends BaseChatProvider {
 
       const responseMessage = response.message;
       console.log('ollama大模型响应非流式输出:', JSON.stringify(responseMessage, null, 2));
+
+      // 提取 Token 用量
+      const usage: TokenUsage = {
+        prompt_tokens: response.prompt_eval_count ?? 0,
+        completion_tokens: response.eval_count ?? 0,
+        // 对于 Ollama，total 就是两者之和
+        total_tokens: (response.prompt_eval_count ?? 0) + (response.eval_count ?? 0),
+      };
+
       const toolCalls: ToolCall[] | undefined = responseMessage.tool_calls?.map((tc, index) => ({
         // Ollama 不提供ID，创建一个
         id: `${tc.function.name}_${Date.now()}_${index}`,
@@ -241,6 +304,7 @@ export class OllamaChatProvider extends BaseChatProvider {
       return {
         content: responseMessage.content,
         tool_calls: toolCalls,
+        usage: usage,
       };
     } catch (error: any) {
       if (error.name === 'AbortError') {
