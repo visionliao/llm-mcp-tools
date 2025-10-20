@@ -16,17 +16,28 @@ export interface ToolCall {
  * 定义 Token 使用情况的结构
  */
 export interface TokenUsage {
-  prompt_tokens: number;
-  completion_tokens: number;
-  total_tokens: number;
+  prompt_tokens: number;  // 输入token
+  completion_tokens: number;  // 输出token
+  total_tokens: number;  // 总token
 }
 
+/**
+ * 定义 LLM API 调用耗时情况的结构
+ * 单位：纳秒 (nanoseconds)
+ */
+export interface DurationUsage {
+  total_duration: number; // 整个请求处理的总耗时（单位通常是纳秒）。包含了模型加载、提示词处理和内容生成的所有时间
+  load_duration: number;  // 如果模型不在内存中，加载模型到内存所花费的时间。如果模型已经加载，这个值可能为0。
+  prompt_eval_duration: number; // 处理（评估）输入提示词（prompt）所花费的时间。
+  eval_duration: number;  // 生成回复内容所花费的时间。
+}
 
 // 定义从 Provider 返回的复杂响应结构，可能是字符串，可能是工具调用信息
 export interface LlmProviderResponse {
   content: string | null;
   tool_calls?: ToolCall[];
   usage?: TokenUsage;
+  duration?: DurationUsage;
 }
 
 /**
@@ -36,6 +47,7 @@ export interface LlmProviderResponse {
 export interface NonStreamingResult {
   content: string;
   usage: TokenUsage;
+  duration?: DurationUsage;
 }
 
 /**
@@ -52,7 +64,24 @@ export interface StreamingResult {
    * 本次对话所消耗的 Token 总量(包含工具调用等)。
    */
   finalUsagePromise: Promise<TokenUsage | undefined>;
+  // 流式输出的耗时统计
+  finalDurationPromise: Promise<DurationUsage | undefined>;
 }
+
+/**
+ * 定义在流中传输的数据块的结构。
+ * 为了将token统计数据也发送到前端，在同一个流中混合发送文本内容和结构化的token消耗元数据。
+ */
+export type StreamChunk = {
+  type: 'text';
+  payload: string; // 聊天文本内容
+} | {
+  type: 'usage';
+  payload: TokenUsage; // Token 用量数据
+} | {
+  type: 'duration';    // 耗时统计
+  payload: DurationUsage;
+};
 
 /**
  * 通用的消息结构，支持 user, assistant, 和 system 角色
@@ -88,15 +117,3 @@ export interface BaseProviderConfig extends LlmGenerationOptions {
   apiKey: string;
   proxyUrl?: string;
 }
-
-/**
- * 定义在流中传输的数据块的结构。
- * 为了将token统计数据也发送到前端，在同一个流中混合发送文本内容和结构化的token消耗元数据。
- */
-export type StreamChunk = {
-  type: 'text';
-  payload: string; // 聊天文本内容
-} | {
-  type: 'usage';
-  payload: TokenUsage; // Token 用量数据
-};

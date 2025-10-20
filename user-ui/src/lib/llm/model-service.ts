@@ -84,6 +84,7 @@ export async function handleChat(
   if (options?.stream === false) {
     const result: NonStreamingResult = await chatProvider.chatNonStreaming(model, messages);
     console.log(`[handleChat] 成功接收到非流式用量数据:`, result.usage);
+    console.log(`[handleChat] 成功接收到非流式耗时数据:`, result.duration);
 
     return result;
   } else {
@@ -109,12 +110,21 @@ export async function handleChat(
           await writer.write(encoder.encode(toSSE(textChunk)));
         }
 
-        // 文本流结束后，等待 finalUsagePromise
-        const finalUsage = await result.finalUsagePromise;
+        // 文本流结束后，等待token消耗统计和耗时两个Promise都完成
+        const [finalUsage, finalDuration] = await Promise.all([
+          result.finalUsagePromise,
+          result.finalDurationPromise
+        ]);
         if (finalUsage) {
-          console.log(`[handleChat] 将最终用量数据注入 SSE 流中:`, finalUsage);
+          console.log(`[handleChat] 将最终token消耗数据注入 SSE 流中:`, finalUsage);
           const usageChunk: StreamChunk = { type: 'usage', payload: finalUsage };
           await writer.write(encoder.encode(toSSE(usageChunk)));
+        }
+        // 发送耗时信息
+        if (finalDuration) {
+          console.log(`[handleChat] 将最终耗时数据注入 SSE 流中:`, finalDuration);
+          const durationChunk: StreamChunk = { type: 'duration', payload: finalDuration };
+          await writer.write(encoder.encode(toSSE(durationChunk)));
         }
       } catch (e) {
         console.error("在 SSE 流转换中发生错误:", e);
@@ -124,7 +134,7 @@ export async function handleChat(
       }
     })();
 
-    // 4. 返回包含了大模型回复流和token消耗结构数据的流
+    // 4. 返回包含了大模型回复流和token消耗数据、耗时数据的流
     return readable;
   }
 }

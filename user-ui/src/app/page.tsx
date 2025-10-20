@@ -1,12 +1,14 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { LlmGenerationOptions, TokenUsage, StreamChunk } from "@/lib/llm/types";
+import { LlmGenerationOptions, TokenUsage, StreamChunk, DurationUsage } from "@/lib/llm/types";
 
 // 定义与后端 lib/llm/types.ts 匹配的类型
 interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
+  duration?: DurationUsage;
+  overhead_ms?: number; // 传输耗时
 }
 
 interface ModelOption {
@@ -56,6 +58,10 @@ CRITICAL RULES:
   const [currentMessageUsage, setCurrentMessageUsage] = useState<TokenUsage | null>(null);
   // 用于累加并显示【当前页面会话】的总 Token 消耗
   const [totalSessionTokens, setTotalSessionTokens] = useState(0);
+  // 用于显示【单条】消息LLM耗时的 State
+  const [currentMessageDuration, setCurrentMessageDuration] = useState<DurationUsage | null>(null);
+  // 用于存储和显示单条消息数据传输开销耗时
+  const [currentMessageOverhead, setCurrentMessageOverhead] = useState<number | null>(null);
 
   // 连接测试处理函数
   const handleConnectivityTest = async () => {
@@ -126,10 +132,14 @@ CRITICAL RULES:
       alert("请输入消息并选择模型");
       return;
     }
+    // 在发送消息时记录起始时间戳
+    const startTime = Date.now(); // 记录发送时刻 (毫秒)
 
     setIsLoading(true);
-    // 在每次发送新消息时，重置上一条消息的 Token 显示
+    // 在每次发送新消息时，重置上一条消息的 Token 显示 和 耗时统计
     setCurrentMessageUsage(null);
+    setCurrentMessageDuration(null);
+    setCurrentMessageOverhead(null);
     const userMessage: ChatMessage = { role: 'user', content: message };
     // 从完整的对话历史中，只截取用户指定的最后几条，如果为0则将历史消息变为空
     const messagesForApi = historyLength > 0 ? conversation.slice(-historyLength) : [];
@@ -176,6 +186,7 @@ CRITICAL RULES:
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let completeResponse = "";
+        let finalDuration: DurationUsage | null = null;
 
         while (true) {
           const { value, done } = await reader.read();
@@ -200,14 +211,39 @@ CRITICAL RULES:
                 setCurrentMessageUsage(usagePayload);
                 // 累加到会话总 Token
                 setTotalSessionTokens(prev => prev + usagePayload.total_tokens);
+              } else if (parsedChunk.type === 'duration') { // 处理耗时数据块
+                const durationPayload = parsedChunk.payload;
+                console.log("从 SSE 流接收到 Duration 数据:", durationPayload);
+                // 更新单条消息的 耗时 显示
+                setCurrentMessageDuration(durationPayload);
+                finalDuration = durationPayload; // 存起来，流结束后用
               }
             } catch (error) {
               console.error("解析 SSE 数据块失败:", jsonString, error);
             }
           }
         }
-        // 流结束后，将完整的回复一次性加入对话历史
-        setConversation(prev => [...prev, { role: 'assistant', content: completeResponse }]);
+        // 流结束后，将完整的回复一次性加入对话历史(包含耗时信息)
+        const endTime = Date.now(); // 记录接收完毕的时刻
+        const totalFrontendTime = endTime - startTime; // 端到端总耗时 (ms)
+
+        if (finalDuration) {
+          const modelTimeMs = finalDuration.total_duration / 1e6; // 模型总耗时 (ms)
+          const overheadMs = Math.round(totalFrontendTime - modelTimeMs);
+          console.log(`总耗时: ${totalFrontendTime}ms, 模型耗时: ${modelTimeMs.toFixed(0)}ms, 开销: ${overheadMs}ms`);
+          setCurrentMessageOverhead(overheadMs);
+
+          // 将所有信息（包括开销）存入对话历史
+          setConversation(prev => [...prev, {
+            role: 'assistant',
+            content: completeResponse,
+            duration: finalDuration,
+            overhead_ms: overheadMs > 0 ? overheadMs : 0 // 避免显示负数
+          }]);
+        } else {
+          // 如果没有收到耗时信息，只保存内容
+          setConversation(prev => [...prev, { role: 'assistant', content: completeResponse }]);
+        }
       } else {
         // 处理非流式响应(仅需要大模型回复可用这个简单方式)
         // const data = await response.json();
@@ -218,9 +254,27 @@ CRITICAL RULES:
         // 1. 解析返回的 JSON，{ content: string, usage: TokenUsage }
         const data = await response.json();
 
+        // 在非流式响应接收后，计算并设置耗时
+        const endTime = Date.now(); // 记录接收完毕的时刻
+        const totalFrontendTime = endTime - startTime; // 端到端总耗时 (ms)
+
+        let overheadMs: number | undefined = undefined;
+        if (data.duration) {
+          const modelTimeMs = data.duration.total_duration / 1e6; // 模型总耗时 (ms)
+          overheadMs = Math.round(totalFrontendTime - modelTimeMs);
+          console.log(`总耗时: ${totalFrontendTime}ms, 模型耗时: ${modelTimeMs.toFixed(0)}ms, 开销: ${overheadMs}ms`);
+          setCurrentMessageOverhead(overheadMs);
+        }
+
         // 2. 提取聊天内容并更新对话历史
         const completeResponse = data.content;
-        setConversation(prev => [...prev, { role: 'assistant', content: completeResponse }]);
+        // 将聊天内容和耗时信息一起存入对话历史
+        setConversation(prev => [...prev, {
+          role: 'assistant',
+          content: completeResponse,
+          duration: data.duration || undefined,
+          overhead_ms: overheadMs !== undefined && overheadMs > 0 ? overheadMs : undefined
+        }]);
 
         // 3. 提取token消耗并更新UI
         if (data.usage) {
@@ -230,6 +284,12 @@ CRITICAL RULES:
           setCurrentMessageUsage(usagePayload);
           // 累加到会话总 Token
           setTotalSessionTokens(prev => prev + usagePayload.total_tokens);
+        }
+        // 4. 提取耗时信息并更新UI
+        if (data.duration) {
+          const durationPayload: DurationUsage = data.duration;
+          console.log("从非流式响应接收到 Duration 数据:", durationPayload);
+          setCurrentMessageDuration(durationPayload);
         }
       }
     } catch (error: any) {
@@ -422,19 +482,67 @@ CRITICAL RULES:
           <div ref={chatContainerRef} className="flex-grow bg-white rounded-lg shadow-inner p-4 overflow-y-auto mb-4 space-y-4">
             {/* 渲染已完成的对话历史 */}
             {conversation.map((msg, index) => (
-              <div key={index} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+              <div key={index} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
                 <div className={`whitespace-pre-wrap max-w-xl px-4 py-2 rounded-lg shadow-sm ${msg.role === 'user' ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-800'}`}>
                   {msg.content}
                 </div>
+                {/* 如果是助理消息并且有耗时信息，则显示它 --- */}
+                {msg.role === 'assistant' && msg.duration && (
+                  <div className="text-xs text-gray-400 mt-1">
+                    <span>LLM总耗时: </span>
+                    <span className="font-medium">{Math.round(msg.duration.total_duration / 1e6)}ms</span>
+                    <span className="mx-1">|</span>
+                    <span>LLM加载: </span>
+                    <span className="font-medium">{Math.round(msg.duration.load_duration / 1e6)}ms</span>
+                    <span className="mx-1">|</span>
+                    <span>处理提示词: </span>
+                    <span className="font-medium">{Math.round(msg.duration.prompt_eval_duration / 1e6)}ms</span>
+                    <span className="mx-1">|</span>
+                    <span>生成内容: </span>
+                    <span className="font-medium">{Math.round(msg.duration.eval_duration / 1e6)}ms</span>
+                    {/* 如果有传输开销数据 */}
+                    {msg.overhead_ms !== undefined && (
+                      <>
+                        <span className="mx-1">|</span>
+                        <span>传输耗时: </span>
+                        <span className="font-medium">{msg.overhead_ms}ms</span>
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
             ))}
             {/* 如果正在接收流式响应，则渲染这个临时消息块 */}
             {streamingResponse && (
-              <div className="flex justify-start">
+              <div className="flex flex-col items-start">
                 <div className="whitespace-pre-wrap max-w-xl px-4 py-2 rounded-lg shadow-sm bg-gray-200 text-gray-800">
                   {streamingResponse}
                   <span className="animate-pulse">▍</span>
                 </div>
+                {/* 在流式响应下方也显示实时更新的耗时信息 */}
+                {currentMessageDuration && (
+                  <div className="text-xs text-gray-400 mt-1">
+                    <span>LLM总耗时: </span>
+                    <span className="font-medium">{Math.round(currentMessageDuration.total_duration / 1e6)}ms</span>
+                    <span className="mx-1">|</span>
+                    <span>LLM加载: </span>
+                    <span className="font-medium">{Math.round(currentMessageDuration.load_duration / 1e6)}ms</span>
+                    <span className="mx-1">|</span>
+                    <span>处理提示词: </span>
+                    <span className="font-medium">{Math.round(currentMessageDuration.prompt_eval_duration / 1e6)}ms</span>
+                    <span className="mx-1">|</span>
+                    <span>生成内容: </span>
+                    <span className="font-medium">{Math.round(currentMessageDuration.eval_duration / 1e6)}ms</span>
+                    {/* 如果有传输开销数据 */}
+                    {currentMessageOverhead !== null && (
+                      <>
+                        <span className="mx-1">|</span>
+                        <span>传输耗时: </span>
+                        <span className="font-medium">{currentMessageOverhead}ms</span>
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
             )}
             {conversation.length === 0 && !streamingResponse && <p className="text-gray-400 text-center">开始对话吧...</p>}
