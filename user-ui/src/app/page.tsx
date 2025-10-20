@@ -489,19 +489,39 @@ CRITICAL RULES:
                 {/* 如果是助理消息并且有耗时信息，则显示它 --- */}
                 {msg.role === 'assistant' && msg.duration && (
                   <div className="text-xs text-gray-400 mt-1">
-                    <span>LLM总耗时: </span>
-                    <span className="font-medium">{Math.round(msg.duration.total_duration / 1e6)}ms</span>
-                    <span className="mx-1">|</span>
-                    <span>LLM加载: </span>
-                    <span className="font-medium">{Math.round(msg.duration.load_duration / 1e6)}ms</span>
-                    <span className="mx-1">|</span>
-                    <span>处理提示词: </span>
-                    <span className="font-medium">{Math.round(msg.duration.prompt_eval_duration / 1e6)}ms</span>
-                    <span className="mx-1">|</span>
-                    <span>生成内容: </span>
-                    <span className="font-medium">{Math.round(msg.duration.eval_duration / 1e6)}ms</span>
+                    {/* LLM总耗时 */}
+                    {msg.duration.total_duration > 0 && (
+                      <>
+                        <span>LLM总耗时: </span>
+                        <span className="font-medium">{Math.round(msg.duration.total_duration / 1e6)}ms</span>
+                      </>
+                    )}
+                    {/* LLM加载 */}
+                    {msg.duration.load_duration > 0 && (
+                      <>
+                        <span className="mx-1">|</span>
+                        <span>LLM加载: </span>
+                        <span className="font-medium">{Math.round(msg.duration.load_duration / 1e6)}ms</span>
+                      </>
+                    )}
+                    {/* LLM思考 */}
+                    {msg.duration.prompt_eval_duration > 0 && (
+                      <>
+                        <span className="mx-1">|</span>
+                        <span>LLM思考: </span>
+                        <span className="font-medium">{Math.round(msg.duration.prompt_eval_duration / 1e6)}ms</span>
+                      </>
+                    )}
+                    {/* 生成内容 */}
+                    {msg.duration.eval_duration > 0 && (
+                      <>
+                        <span className="mx-1">|</span>
+                        <span>生成内容: </span>
+                        <span className="font-medium">{Math.round(msg.duration.eval_duration / 1e6)}ms</span>
+                      </>
+                    )}
                     {/* 如果有传输开销数据 */}
-                    {msg.overhead_ms !== undefined && (
+                    {msg.overhead_ms !== undefined && msg.overhead_ms > 0 && (
                       <>
                         <span className="mx-1">|</span>
                         <span>传输耗时: </span>
@@ -522,19 +542,35 @@ CRITICAL RULES:
                 {/* 在流式响应下方也显示实时更新的耗时信息 */}
                 {currentMessageDuration && (
                   <div className="text-xs text-gray-400 mt-1">
-                    <span>LLM总耗时: </span>
-                    <span className="font-medium">{Math.round(currentMessageDuration.total_duration / 1e6)}ms</span>
-                    <span className="mx-1">|</span>
-                    <span>LLM加载: </span>
-                    <span className="font-medium">{Math.round(currentMessageDuration.load_duration / 1e6)}ms</span>
-                    <span className="mx-1">|</span>
-                    <span>处理提示词: </span>
-                    <span className="font-medium">{Math.round(currentMessageDuration.prompt_eval_duration / 1e6)}ms</span>
-                    <span className="mx-1">|</span>
-                    <span>生成内容: </span>
-                    <span className="font-medium">{Math.round(currentMessageDuration.eval_duration / 1e6)}ms</span>
+                    {currentMessageDuration.total_duration > 0 && (
+                      <>
+                        <span>LLM总耗时: </span>
+                        <span className="font-medium">{Math.round(currentMessageDuration.total_duration / 1e6)}ms</span>
+                      </>
+                    )}
+                    {currentMessageDuration.load_duration > 0 && (
+                      <>
+                        <span className="mx-1">|</span>
+                        <span>LLM加载: </span>
+                        <span className="font-medium">{Math.round(currentMessageDuration.load_duration / 1e6)}ms</span>
+                      </>
+                    )}
+                    {currentMessageDuration.prompt_eval_duration > 0 && (
+                      <>
+                        <span className="mx-1">|</span>
+                        <span>LLM思考: </span>
+                        <span className="font-medium">{Math.round(currentMessageDuration.prompt_eval_duration / 1e6)}ms</span>
+                      </>
+                    )}
+                    {currentMessageDuration.eval_duration > 0 && (
+                      <>
+                        <span className="mx-1">|</span>
+                        <span>生成内容: </span>
+                        <span className="font-medium">{Math.round(currentMessageDuration.eval_duration / 1e6)}ms</span>
+                      </>
+                    )}
                     {/* 如果有传输开销数据 */}
-                    {currentMessageOverhead !== null && (
+                    {currentMessageOverhead !== null && currentMessageOverhead > 0 && (
                       <>
                         <span className="mx-1">|</span>
                         <span>传输耗时: </span>

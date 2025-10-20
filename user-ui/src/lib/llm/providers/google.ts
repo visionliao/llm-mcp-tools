@@ -12,7 +12,7 @@ import {
   GenerateContentStreamResult,
 } from "@google/generative-ai";
 import { BaseChatProvider } from "../base-provider";
-import { ChatMessage, ToolCall, LlmProviderResponse, TokenUsage, StreamingResult } from "../types";
+import { ChatMessage, ToolCall, LlmProviderResponse, TokenUsage, DurationUsage, StreamingResult } from "../types";
 import { McpToolSchema } from "../tools/tool-client";
 
 export class GoogleChatProvider extends BaseChatProvider {
@@ -166,6 +166,9 @@ export class GoogleChatProvider extends BaseChatProvider {
         timeout: this.config.timeoutMs,
       };
 
+      // 记录请求开始时间
+      const requestStartTime = Date.now();
+
       // 2. 调用google的流逝输出接口
       const result: GenerateContentStreamResult = await generativeModel.generateContentStream(
         { contents: formattedMessages },
@@ -192,6 +195,7 @@ export class GoogleChatProvider extends BaseChatProvider {
       // 获取第一个流块
       const firstChunk = firstChunkResult.value;
       const functionCalls = firstChunk.functionCalls();
+      const firstChunkTime = Date.now(); // 第一个流块到达时间
 
       // 4. 检查第一个有数据的块是否是工具调用信息
       if (functionCalls && functionCalls.length > 0) {
@@ -203,6 +207,16 @@ export class GoogleChatProvider extends BaseChatProvider {
             prompt_tokens: finalResponse.usageMetadata.promptTokenCount,
             completion_tokens: finalResponse.usageMetadata.candidatesTokenCount,
             total_tokens: finalResponse.usageMetadata.totalTokenCount,
+        };
+
+        // --- 计算并构造 DurationUsage ---
+        const promptEvalMs = firstChunkTime - requestStartTime;
+        const duration: DurationUsage = {
+          // 工具调用是一次性返回的，所以没有"生成"时间
+          prompt_eval_duration: promptEvalMs * 1e6, // ms to ns
+          eval_duration: 0,
+          total_duration: promptEvalMs * 1e6, // ms to ns
+          load_duration: 0,
         };
 
         // 5. 工具格式转换
@@ -220,31 +234,11 @@ export class GoogleChatProvider extends BaseChatProvider {
           content: firstChunk.text() || null,
           tool_calls: toolCalls,
           usage: usage,
+          duration: duration,
         };
       } else {
         // 普通文本流，表示没有工具调用，或者工具调用完毕这是大模型最终的回复
         console.log('流式输出第一个数据块是文本，将返回 ReadableStream');
-
-        // 7. 将 Google SDK 的流转换为标准的 Web ReadableStream
-        const stream = new ReadableStream<string>({
-          async start(controller) {
-            const firstText = firstChunk.text();
-            if (firstText) {
-              console.log('google大模型返回文本流:', firstText);
-              controller.enqueue(firstText);
-            }
-            while (true) {
-              const nextChunkResult = await streamIterator.next();
-              if (nextChunkResult.done) break;
-              const nextText = nextChunkResult.value.text();
-              if (nextText) {
-                console.log('google大模型返回文本流:', nextText);
-                controller.enqueue(nextText);
-              }
-            }
-            controller.close();
-          },
-        });
 
         // 创建一个 Promise 管道，当最终答复结束后这个管道才会输出token用量信息
         const finalUsagePromise: Promise<TokenUsage | undefined> = new Promise(async (resolve) => {
@@ -265,10 +259,57 @@ export class GoogleChatProvider extends BaseChatProvider {
           }
         });
 
+        // 为耗时创建 Promise
+        let finalDurationResolver: (duration: DurationUsage | undefined) => void;
+        const finalDurationPromise = new Promise<DurationUsage | undefined>(resolve => {
+          finalDurationResolver = resolve;
+        });
+
+        // 7. 将 Google SDK 的流转换为标准的 Web ReadableStream
+        const stream = new ReadableStream<string>({
+          async start(controller) {
+            let lastChunkTime = firstChunkTime; // 初始化最后一块的时间
+            try {
+              const firstText = firstChunk.text();
+              if (firstText) {
+                console.log('google大模型返回文本流:', firstText);
+                controller.enqueue(firstText);
+              }
+              while (true) {
+                const nextChunkResult = await streamIterator.next();
+                if (nextChunkResult.done) break;
+                lastChunkTime = Date.now(); // 持续更新最后一块的到达时间
+                const nextText = nextChunkResult.value.text();
+                if (nextText) {
+                  console.log('google大模型返回文本流:', nextText);
+                  controller.enqueue(nextText);
+                }
+              }
+            } catch (e) {
+                console.error("Google stream processing error:", e);
+                finalDurationResolver(undefined); // 异常时
+                controller.error(e);
+            } finally {
+              // --- 步骤 4: 流结束后，计算最终耗时并解析 Promise ---
+              const promptEvalMs = firstChunkTime - requestStartTime;
+              const evalMs = lastChunkTime - firstChunkTime;
+              const finalDuration: DurationUsage = {
+                prompt_eval_duration: promptEvalMs * 1e6,
+                eval_duration: evalMs * 1e6,
+                total_duration: (promptEvalMs + evalMs) * 1e6,
+                load_duration: 0,
+              };
+              finalDurationResolver(finalDuration);
+              controller.close();
+            }
+          },
+        });
+
         // 大模型回复和token消耗信息包装在 StreamingResult 对象中并返回
         return {
           stream: stream,
-          finalUsagePromise: finalUsagePromise
+          finalUsagePromise: finalUsagePromise,
+          finalDurationPromise: finalDurationPromise
         };
       }
     } catch (error: any) {
@@ -291,11 +332,17 @@ export class GoogleChatProvider extends BaseChatProvider {
         timeout: this.config.timeoutMs,
       };
 
+      // 记录请求开始时间
+      const requestStartTime = Date.now();
+
       // 调用 SDK 的非流式 API: generateContent
       const result: GenerateContentResult = await generativeModel.generateContent(
         { contents: formattedMessages },
         requestOptions
       );
+
+      // 记录收到完整响应的时间点
+      const requestEndTime = Date.now();
 
       const response = result.response;
       console.log('google大模型响应非流式输出:', JSON.stringify(response, null, 2));
@@ -330,10 +377,21 @@ export class GoogleChatProvider extends BaseChatProvider {
           };
         });
 
+      // 计算并构造 DurationUsage
+      const modelTimeMs = requestEndTime - requestStartTime;
+      const duration: DurationUsage = {
+        // 非流式无法区分思考和生成，统一归为 prompt_eval
+        prompt_eval_duration: modelTimeMs * 1e6, // ms to ns
+        eval_duration: 0,
+        total_duration: modelTimeMs * 1e6, // ms to ns
+        load_duration: 0,
+      };
+
       return {
         content: textContent,
         tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
         usage: usage,
+        duration: duration,
       };
     } catch (error: any) {
       this._handleGoogleApiError(error, model)
