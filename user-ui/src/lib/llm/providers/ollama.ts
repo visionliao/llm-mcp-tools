@@ -122,8 +122,10 @@ export class OllamaChatProvider extends BaseChatProvider {
     console.log('Provider: Ollama');
     console.log('Model:', model);
     console.log('参数配置信息:', JSON.stringify(options, null, 2));
-    if (tools) console.log('可用工具数量: ', tools.length);
-    console.log('最大工具调用次数限制:', this.config.maxToolCalls ?? 5);
+    if (tools) {
+      console.log('可用工具数量: ', tools.length);
+      console.log('最大工具调用次数限制:', this.config.maxToolCalls ?? 5);
+    }
     console.log('-------------------------------------\n');
 
     try {
@@ -298,8 +300,10 @@ export class OllamaChatProvider extends BaseChatProvider {
     console.log('Provider: Ollama');
     console.log('Model:', model);
     console.log('参数配置信息:', JSON.stringify(options, null, 2));
-    if (tools) console.log('可用工具数量: ', tools.length);
-    console.log('最大工具调用次数限制:', this.config.maxToolCalls ?? 5);
+    if (tools) {
+      console.log('可用工具数量: ', tools.length);
+      console.log('最大工具调用次数限制:', this.config.maxToolCalls ?? 5);
+    }
     console.log('-----------------------------------------\n');
 
     try {
