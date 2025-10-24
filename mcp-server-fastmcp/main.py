@@ -2,6 +2,8 @@ import uvicorn
 from typing import List, Union, Optional, Any
 import datetime
 import re
+import threading
+import time
 # 导入 FastMCP 框架
 # from mcp.server.fastmcp import FastMCP  # 这是MCP官方Inspector 方式，主要用来调试
 from fastmcp import FastMCP
@@ -31,6 +33,66 @@ from services.constants import (
     SERVICE_CODE_MAP, LOCATION_CODE_MAP
 )
 
+# 全局初始化状态管理
+server_initialized = False
+initialization_lock = threading.Lock()
+initialization_error = None
+
+def check_initialization():
+    """检查服务器是否已完成初始化"""
+    global server_initialized, initialization_error
+
+    if server_initialized:
+        if initialization_error:
+            return False, f"服务器初始化失败: {initialization_error}"
+        return True, "服务器已就绪"
+
+    return False, "服务器初始化中，请稍后重试..."
+
+def initialize_server_data():
+    """预加载所有数据文件以确保服务器完全初始化"""
+    global server_initialized, initialization_error
+
+    try:
+        with initialization_lock:
+            if server_initialized:
+                return
+
+            print("--- 开始服务器数据预加载 ---")
+
+            # 预加载所有数据文件
+            from services.data_loader import get_master_base_df, get_master_guest_df, get_lease_service_orders
+
+            # 加载master_base.xml
+            print("正在加载 master_base.xml...")
+            master_base_df = get_master_base_df()
+            if master_base_df is None:
+                raise Exception("master_base.xml 加载失败")
+            print(f"✓ master_base.xml 加载成功，共 {len(master_base_df)} 条记录")
+
+            # 加载master_guest.xml
+            print("正在加载 master_guest.xml...")
+            master_guest_df = get_master_guest_df()
+            if master_guest_df is None:
+                raise Exception("master_guest.xml 加载失败")
+            print(f"✓ master_guest.xml 加载成功，共 {len(master_guest_df)} 条记录")
+
+            # 加载lease_service_order.xml
+            print("正在加载 lease_service_order.xml...")
+            service_orders = get_lease_service_orders()
+            if service_orders is None:
+                raise Exception("lease_service_order.xml 加载失败")
+            print(f"✓ lease_service_order.xml 加载成功，共 {len(service_orders)} 条记录")
+
+            server_initialized = True
+            initialization_error = None
+            print("--- 服务器数据预加载完成 ---")
+
+    except Exception as e:
+        initialization_error = str(e)
+        server_initialized = True  # 标记为已初始化，但有错误
+        print(f"--- 服务器初始化失败: {e} ---")
+
 # 初始化 FastMCP 应用 ---
 mcp = FastMCP(name="公寓数据查询工具集 (FastMCP v1.0)", host="0.0.0.0", port=8001)
 
@@ -41,6 +103,10 @@ def get_current_time(format_str: str = "%Y-%m-%d %H:%M:%S") -> str:
     获取当前的系统日期和时间。
     - format_str (str): 可选参数，用于指定返回时间的格式，默认为 '%Y-%m-%d %H:%M:%S'。
     """
+    # 检查服务器初始化状态
+    is_ready, message = check_initialization()
+    if not is_ready:
+        return message
     return datetime.datetime.now().strftime(format_str)
 
 
@@ -74,6 +140,10 @@ def calculate_occupancy(start: str, end: str, details: str):
     - details (str): 是否返回每日明细。传入 'y' 获取每日详情，传入 'n' 只获取总体摘要。
     【提示】: 此工具用于获取高层级的总体数据。如需按房型分析详细的经营表现，请使用 'occupancy_details' 工具。
     """
+    # 检查服务器初始化状态
+    is_ready, message = check_initialization()
+    if not is_ready:
+        return message
 
     TOTAL_ROOMS = 579
 
@@ -109,6 +179,11 @@ def occupancy_details(start_time: str, end_time: str) -> str:
     - end_time (str): 结束日期，格式为 'YYYY-MM-DD'。
     【提示】: 此工具用于深入分析不同房型的表现。如只需查询总体的出租率，请使用 'calculate_occupancy' 工具。
     """
+    # 检查服务器初始化状态
+    is_ready, message = check_initialization()
+    if not is_ready:
+        return message
+
     print("--- 户型经营表现分析工具 ---")
 
     start_date_input = start_time
@@ -144,10 +219,14 @@ def query_guest(id: str):
     返回信息包括姓名、联系方式、国籍和证件号码等。
     - id (str): 用户的唯一数字ID。此ID可从 'occupancy_details' 等工具的返回结果中获得。
     """
+    # 检查服务器初始化状态
+    is_ready, message = check_initialization()
+    if not is_ready:
+        return message
 
     # 1. 从缓存中获取已处理好的DataFrame
     guest_df = get_master_guest_df()
-    
+
     if guest_df is None:
         return "错误：客户数据服务当前不可用，请检查服务日志。"
     
@@ -161,7 +240,7 @@ def query_guest(id: str):
     return get_query_result_as_string(guest_df, query_id)
 
 @mcp.tool()
-def query_checkins(start: str, end: str, choice: str):
+def query_checkins(start: str, end: str, choice: str='ALL'):
     """
     查询指定日期范围和状态下的入住记录。
     返回一个列表，包含每条记录的入住/离店日期、房号、房型、租金、状态和用户ID等信息。
@@ -169,6 +248,11 @@ def query_checkins(start: str, end: str, choice: str):
     - end (str): 结束日期，格式为 'YYYY-MM-DD'。
     - choice (str): 查询的状态。'1'代表在住(I), '2'代表结账(O), '3'代表取消(X), '4'代表预订(R), '5'代表所有状态(ALL)。
     """
+    # 检查服务器初始化状态
+    is_ready, message = check_initialization()
+    if not is_ready:
+        return message
+
     # 1. 从缓存加载数据
     master_df = get_master_base_df()
     if master_df is None:
@@ -192,6 +276,11 @@ def query_by_room(rooms: Union[str, List[str]]):
     返回这些房间的所有相关记录，包括入住/离店日期、租金、状态和用户ID等。
     - rooms (Union[str, List[str]]): 单个房间号（如 "A312"）或一个房间号列表（如 ["A312", "B1510"]）。
     """
+    # 检查服务器初始化状态
+    is_ready, message = check_initialization()
+    if not is_ready:
+        return message
+
     # 1. 解析输入参数 (这是工具层的职责)
     final_room_list: List[str] = []
     if isinstance(rooms, list):
@@ -225,6 +314,11 @@ def query_orders(room: str):
     返回一个工单列表，包含工单ID、服务项目、需求描述、状态和处理结果等信息。
     - room (str): 需要查询的房间号。
     """
+    # 检查服务器初始化状态
+    is_ready, message = check_initialization()
+    if not is_ready:
+        return message
+
     # 1. 从缓存加载所有工单数据
     all_orders = get_lease_service_orders() # 此函数已在data_loader中定义
     if all_orders is None:
@@ -252,6 +346,11 @@ def advanced_query_service(
     - location_code (str, optional): 具体位置代码, 例如 '004' 代表厨房。
     【提示】: 如果只是根据房间号查询工单，使用 'query_orders' 工具更简单。
     """
+    # 检查服务器初始化状态
+    is_ready, message = check_initialization()
+    if not is_ready:
+        return message
+
     all_orders_data = get_lease_service_orders()
     if all_orders_data is None:
         return "错误: 无法加载工单数据，请检查服务日志。"
@@ -279,5 +378,11 @@ def advanced_query_service(
 
 if __name__ == "__main__":
     print(f"Starting native FastMCP server on http://{mcp.settings.host}:{mcp.settings.port}")
+
+    # 在后台线程中启动数据初始化
+    import threading
+    init_thread = threading.Thread(target=initialize_server_data, daemon=True)
+    init_thread.start()
+
     # 根据源代码，'streamable-http' 是用于通用HTTP交互的模式
     mcp.run(transport="sse")

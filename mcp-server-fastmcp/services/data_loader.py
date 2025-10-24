@@ -104,7 +104,12 @@ def get_master_base_df() -> Optional[pd.DataFrame]:
     之后的所有调用将立即返回内存中的缓存结果。
     """
     print("--- [Cache] 首次加载并解析 master_base.xml ---")
-    return _parse_spreadsheetml('services/master_base.xml')
+    df = _parse_spreadsheetml('services/master_base.xml')
+    if df is not None:
+        print(f"--- [Cache] master_base.xml 加载成功，共 {len(df)} 条记录 ---")
+    else:
+        print("--- [Cache] master_base.xml 加载失败 ---")
+    return df
 
 @lru_cache(maxsize=None)
 def get_master_guest_df() -> Optional[pd.DataFrame]:
@@ -142,6 +147,11 @@ def get_master_guest_df() -> Optional[pd.DataFrame]:
 def get_lease_service_orders() -> Optional[List[Dict[str, Any]]]:
     """加载并缓存 lease_service_order.xml 数据，返回字典列表。"""
     print("--- [Cache] 首次加载并解析 lease_service_order.xml ---")
-    return _parse_service_order_xml('services/lease_service_order.xml')
+    orders = _parse_service_order_xml('services/lease_service_order.xml')
+    if orders is not None:
+        print(f"--- [Cache] lease_service_order.xml 加载成功，共 {len(orders)} 条记录 ---")
+    else:
+        print("--- [Cache] lease_service_order.xml 加载失败 ---")
+    return orders
 
 # 如果还有其他XML文件，请在这里为它们添加类似的 get_..._df() 函数
