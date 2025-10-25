@@ -98,7 +98,7 @@ def initialize_server_data():
         print(f"--- 服务器初始化失败: {e} ---")
 
 # 初始化 FastMCP 应用 ---
-mcp = FastMCP(name="公寓数据查询工具集 (FastMCP sse v1.0)", host="0.0.0.0", port=8001)
+mcp = FastMCP(name="公寓数据查询工具集 (FastMCP streamablehttp v1.0)", host="0.0.0.0", port=8002)
 
 # --- 1. 查询现在的系统时间 ---
 @mcp.tool()
@@ -785,4 +785,4 @@ if __name__ == "__main__":
     init_thread.start()
 
     # 根据源代码，'streamable-http' 是用于通用HTTP交互的模式
-    mcp.run(transport="sse")
+    mcp.run(transport="streamable-http")

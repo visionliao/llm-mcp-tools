@@ -1,6 +1,7 @@
 // lib/llm/tools/tool-client.ts
 
-import { FastMCPClient } from './fastmcp-client';
+import { BaseFastMCPClient } from './base-fastmcp-client';
+import { FastMCPClientFactory } from './fastmcp-client-factory';
 
 // 定义 MCP 服务返回结构的类型
 export interface McpToolSchema {
@@ -15,8 +16,8 @@ export interface McpToolSchema {
 export class ToolClient {
     private serverUrl: string;
     private toolsCache: McpToolSchema[] | null | undefined = null;
-    private fastMCPClient: FastMCPClient | null = null;
-    private serverTypeCache: 'fastmcp' | 'fastapi' | null = null;
+    private fastMCPClient: BaseFastMCPClient | null = null;
+    private serverTypeCache: 'fastmcp-sse' | 'fastmcp-streamablehttp' | 'fastapi' | null = null;
 
     constructor(serverUrl: string) {
         this.serverUrl = serverUrl;
@@ -24,9 +25,9 @@ export class ToolClient {
 
     /**
      * 动态检测MCP服务器类型
-     * 通过测试不同的端点来判断是FastMCP还是FastAPI
+     * 通过测试不同的端点来判断是FastMCP SSE、FastMCP StreamableHTTP还是FastAPI
      */
-    private async detectServerType(): Promise<'fastmcp' | 'fastapi'> {
+    private async detectServerType(): Promise<'fastmcp-sse' | 'fastmcp-streamablehttp' | 'fastapi'> {
         // 如果已经检测过，直接返回缓存结果
         if (this.serverTypeCache) {
             return this.serverTypeCache;
@@ -35,30 +36,22 @@ export class ToolClient {
         try {
             console.log(`--- [Server Detection] Detecting server type for ${this.serverUrl} ---`);
 
-            // 首先尝试检测FastMCP的SSE端点
-            const sseUrl = `${this.serverUrl}/sse`;
-            console.log(`--- [Server Detection] Testing FastMCP SSE endpoint: ${sseUrl} ---`);
+            // 使用FastMCPClientFactory检测协议类型
+            const protocolType = await FastMCPClientFactory.detectProtocolType(this.serverUrl);
 
-            try {
-                const sseResponse = await fetch(sseUrl, {
-                    method: 'GET',
-                    headers: { 'Accept': 'text/event-stream' },
-                    signal: AbortSignal.timeout(5000) // 5秒超时
-                });
-
-                if (sseResponse.ok || sseResponse.status === 200) {
-                    console.log(`--- [Server Detection] FastMCP SSE endpoint responded, detected as FastMCP server ---`);
-                    this.serverTypeCache = 'fastmcp';
-                    return 'fastmcp';
-                }
-            } catch (sseError) {
-                console.log(`--- [Server Detection] SSE endpoint test failed: ${sseError instanceof Error ? sseError.message : String(sseError)} ---`);
+            if (protocolType === 'sse') {
+                console.log(`--- [Server Detection] FastMCP SSE protocol detected ---`);
+                this.serverTypeCache = 'fastmcp-sse';
+                return 'fastmcp-sse';
+            } else if (protocolType === 'streamablehttp') {
+                console.log(`--- [Server Detection] FastMCP StreamableHTTP protocol detected ---`);
+                this.serverTypeCache = 'fastmcp-streamablehttp';
+                return 'fastmcp-streamablehttp';
             }
 
-            // 尝试检测FastAPI的tools端点
+            // 如果没有检测到FastMCP协议，尝试检测FastAPI
+            console.log(`--- [Server Detection] Testing FastAPI tools endpoint ---`);
             const toolsUrl = `${this.serverUrl}/tools`;
-            console.log(`--- [Server Detection] Testing FastAPI tools endpoint: ${toolsUrl} ---`);
-
             try {
                 const toolsResponse = await fetch(toolsUrl, {
                     method: 'GET',
@@ -79,7 +72,7 @@ export class ToolClient {
                 console.log(`--- [Server Detection] Tools endpoint test failed: ${toolsError instanceof Error ? toolsError.message : String(toolsError)} ---`);
             }
 
-            // 如果两个端点都测试失败，尝试基础的HTTP连接测试
+            // 如果所有检测都失败，尝试基础的HTTP连接测试
             console.log(`--- [Server Detection] Testing basic HTTP connectivity to ${this.serverUrl} ---`);
             try {
                 const basicResponse = await fetch(this.serverUrl, {
@@ -97,7 +90,7 @@ export class ToolClient {
             }
 
             // 如果所有检测都失败，抛出错误
-            throw new Error('Unable to determine MCP server type. Both FastMCP SSE and FastAPI endpoints are not accessible.');
+            throw new Error('Unable to determine MCP server type. No supported protocols detected.');
         } catch (error) {
             console.error('[Server Detection] Server type detection failed:', error);
             throw new Error(`Failed to detect MCP server type: ${error instanceof Error ? error.message : String(error)}`);
@@ -110,7 +103,7 @@ export class ToolClient {
     private async isFastMCPServer(): Promise<boolean> {
         try {
             const serverType = await this.detectServerType();
-            return serverType === 'fastmcp';
+            return serverType === 'fastmcp-sse' || serverType === 'fastmcp-streamablehttp';
         } catch {
             // 如果检测失败，默认为FastAPI
             return false;
@@ -120,9 +113,22 @@ export class ToolClient {
     /**
      * 获取FastMCP客户端实例
      */
-    private getFastMCPClient(): FastMCPClient {
+    private async getFastMCPClient(): Promise<BaseFastMCPClient> {
         if (!this.fastMCPClient) {
-            this.fastMCPClient = new FastMCPClient(this.serverUrl);
+            // 根据检测到的服务器类型创建相应的客户端
+            const serverType = await this.detectServerType();
+            let protocolType: 'sse' | 'streamablehttp' | undefined = undefined;
+
+            if (serverType === 'fastmcp-sse') {
+                protocolType = 'sse';
+            } else if (serverType === 'fastmcp-streamablehttp') {
+                protocolType = 'streamablehttp';
+            }
+
+            this.fastMCPClient = await FastMCPClientFactory.createClient(this.serverUrl, protocolType);
+            if (!this.fastMCPClient) {
+                throw new Error('Failed to create FastMCP client');
+            }
         }
         return this.fastMCPClient;
     }
@@ -130,7 +136,7 @@ export class ToolClient {
     /**
      * 获取检测到的服务器类型
      */
-    public async getServerType(): Promise<'fastmcp' | 'fastapi' | 'unknown'> {
+    public async getServerType(): Promise<'fastmcp-sse' | 'fastmcp-streamablehttp' | 'fastapi' | 'unknown'> {
         try {
             return await this.detectServerType();
         } catch {
@@ -150,7 +156,7 @@ export class ToolClient {
 
             if (isFastMCP) {
                 console.log(`--- [Tool Discovery] Using FastMCP client for ${this.serverUrl} ---`);
-                this.toolsCache = await this.getFastMCPClient().getToolsSchema();
+                this.toolsCache = await (await this.getFastMCPClient()).getToolsSchema();
             } else {
                 console.log(`--- [Tool Discovery] Using FastAPI client for ${this.serverUrl} ---`);
                 const response = await fetch(`${this.serverUrl}/tools`);
@@ -181,7 +187,7 @@ export class ToolClient {
 
             if (isFastMCP) {
                 console.log(`--- [ToolClient] Using FastMCP client for tool execution ---`);
-                const result = await this.getFastMCPClient().callTool(toolName, toolArgs);
+                const result = await (await this.getFastMCPClient()).callTool(toolName, toolArgs);
                 console.log(`--- FastMCP工具执行结果： ${JSON.stringify(result, null, 2)}`);
                 return result;
             } else {

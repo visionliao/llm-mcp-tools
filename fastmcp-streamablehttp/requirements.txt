@@ -1,0 +1,7 @@
+fastmcp
+uvicorn[standard]
+pydantic
+pandas
+lxml  # pandas 读取 xml 可能需要
+lxml-stubs
+dateparser  #能够解析几乎所有自然语言格式的日期和时间段，并且支持中文。

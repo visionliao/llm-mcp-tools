@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import Dict, Any
+import uvicorn
 
 from tool_registry import TOOL_REGISTRY, get_tools_schema
 
@@ -61,3 +62,8 @@ async def call_tool(request: ToolCallRequest):
 async def health_check():
     """提供一个简单的健康检查接口，确认服务正在运行。"""
     return {"status": "ok", "available_tools_count": len(TOOL_REGISTRY)}
+
+# 终端启动指令：uvicorn main:app --host 0.0.0.0 --port 8000
+if __name__ == "__main__":
+    print("Starting MCP FastAPI server on http://0.0.0.0:8000")
+    uvicorn.run(app, host="0.0.0.0", port=8000)
