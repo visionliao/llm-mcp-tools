@@ -7,6 +7,10 @@ import time
 # 导入 FastMCP 框架
 # from mcp.server.fastmcp import FastMCP  # 这是MCP官方Inspector 方式，主要用来调试
 from fastmcp import FastMCP
+import dateparser
+from dateutil.relativedelta import relativedelta
+from dateparser.date import DateDataParser
+from dateparser.search import search_dates
 
 '''
 如果使用mcp.server.fastmcp，可以通过 pip install mcp[cli] 这个官方工具，进行本地浏览器调试。
@@ -107,6 +111,107 @@ def get_current_time(format_str: str = "%Y-%m-%d %H:%M:%S") -> str:
     if not is_ready:
         return message
     return datetime.datetime.now().strftime(format_str)
+
+
+@mcp.tool()
+def get_required_date_range(time_description: str) -> str:
+    """
+    功能描述 (description):
+    一个强大的自然语言时间解析器。它能从复杂的句子中智能提取出时间信息（如“上个月”、“8月份”、“本周”、“过去60天”），并将其转换为精确的“YYYY-MM-DD”格式的起止日期范围。
+
+    【执行协议 (Execution Protocol)】:
+    1.  **与核心准则 #5 联动**: 根据你的核心行为准则 #5，在处理数据查询时，你需要先制定并告知用户你的计划。
+    2.  **计划的第一步**: 本工具是这个计划中【第一步的强制执行动作】。它的作用是为后续所有的数据查询步骤提供必需的、精确的时间范围。
+    3.  **立即执行指令**: 因此，在你的回复中，**在“告知用户计划”之后，你【必须】在同一轮次的回复中立即调用本工具**，不能有任何停顿。
+
+    【正确与错误的行为示例】:
+    ---
+    **场景:** 用户提问 "查询8月份的入住记录"
+
+    ** 正确行为 (遵循协议):**
+    1.  **你的回复 (告知计划):** "好的，我将为您查询8月份的入住记录。我的计划是：首先，确定8月的具体日期；然后，查询该时间段的入住记录..."
+    2.  **你的行动 (立即调用):** (在同一回复中，紧接着生成工具调用)
+        `get_required_date_range(time_description="8月份")`
+
+    ** 错误行为 (违反协议):**
+    1.  **你的回复 (告知计划后停止):** "好的，我将为您查询8月份的入住记录。我的计划是：..." (然后停止，等待用户)
+    ---
+
+    输入参数 (parameters):
+    name: time_description
+    type: string
+    description: 用户的、可能包含复杂上下文的原始自然语言时间描述。例如: "查询8月整月的入住记录", "上个月的情况怎么样"。
+    required: true
+
+    返回结果 (returns):
+    type: string
+    description: 一个格式化的字符串，包含后续工具所需的精确起止日期。
+    """
+    # 检查服务器初始化状态
+    is_ready, message = check_initialization()
+    if not is_ready:
+        return message
+
+    try:
+        now = datetime.datetime.now()
+
+        # --- 提取信号，而非移除噪音 ---
+        # 尝试从整个句子中找出描述日期的子字符串
+        # 例如，从 "查询8月整月的入住记录" 中，它会找到 "8月"
+        found_dates = search_dates(time_description, languages=['zh', 'en'])
+
+        effective_description = time_description # 默认为原始输入
+        if found_dates:
+            # 如果找到了，就用找到的第一个日期子字符串作为我们的解析目标
+            effective_description = found_dates[0][0]
+
+        # 尝试用正则表达式解析精确的相对时间，如“过去30天”
+        match_days = re.match(r"(?:过去|最近)\s*(\d+)\s*天", effective_description)
+        match_months = re.match(r"(?:过去|最近)\s*(\d+)\s*个月", effective_description)
+
+        if match_days:
+            days = int(match_days.group(1))
+            end_date = now.date()
+            start_date = end_date - datetime.timedelta(days=days - 1)
+            return f"已将'{time_description}'解析为具体时间段：开始日期 '{start_date.strftime('%Y-%m-%d')}'，结束日期 '{end_date.strftime('%Y-%m-%d')}'。"
+
+        if match_months:
+            months = int(match_months.group(1))
+            end_date = now.date()
+            start_date = end_date - relativedelta(months=months) + datetime.timedelta(days=1)
+            return f"已将'{time_description}'解析为具体时间段：开始日期 '{start_date.strftime('%Y-%m-%d')}'，结束日期 '{end_date.strftime('%Y-%m-%d')}'。"
+
+        # 使用强大的 dateparser 库进行通用解析
+        d = DateDataParser(languages=['zh', 'en']).get_date_data(effective_description)
+
+        if d and d.date_obj:
+            parsed_date = d.date_obj.date()
+            period = d.period
+
+            start_date, end_date = None, None
+            if period == 'month':
+                start_date = parsed_date.replace(day=1)
+                end_date = start_date + relativedelta(months=1) - datetime.timedelta(days=1)
+            elif period == 'year':
+                start_date = parsed_date.replace(month=1, day=1)
+                end_date = parsed_date.replace(month=12, day=31)
+            elif period == 'week':
+                start_date = parsed_date - datetime.timedelta(days=parsed_date.weekday())
+                end_date = start_date + datetime.timedelta(days=6)
+            else:
+                start_date = parsed_date
+                end_date = parsed_date
+
+            return f"已将'{time_description}'解析为具体时间段：开始日期 '{start_date.strftime('%Y-%m-%d')}'，结束日期 '{end_date.strftime('%Y-%m-%d')}'。"
+
+        # 兜底机制: 如果以上所有智能方法都失败
+        else:
+            end_date = now.date()
+            start_date = end_date - datetime.timedelta(days=6)
+            return f"无法从'{time_description}'中解析出明确日期。已应用默认的最近7天范围：开始日期 '{start_date.strftime('%Y-%m-%d')}'，结束日期 '{end_date.strftime('%Y-%m-%d')}'。"
+
+    except Exception as e:
+        return f"解析时间'{time_description}'时发生内部错误: {e}"
 
 
 # --- 2. 通用计算工具函数 ---
