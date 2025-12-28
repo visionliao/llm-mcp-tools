@@ -1,4 +1,5 @@
 import logging
+import json
 from typing import Optional, Union, List, Set
 
 try:
@@ -69,11 +70,16 @@ def get_image_list_logic(
 
     # 3. 处理 targets 列表
     if targets:
-        # 确保是列表 (normalize_list_param 可能会返回 str 如果不是json格式)
-        if isinstance(targets, str):
-            targets = [targets]
+        target_list = []
+        if isinstance(targets, list):
+            target_list = targets
+        elif isinstance(targets, str):
+            # 处理 "lobby,gym" 这种非JSON格式
+            # 去除可能存在的括号引号，按逗号分割
+            clean_str = targets.replace('[', '').replace(']', '').replace('"', '').replace("'", "")
+            target_list = [t.strip() for t in clean_str.split(',') if t.strip()]
             
-        for t in targets:
+        for t in target_list:
             key = str(t).strip()
             # 精确匹配 Key，不搞任何模糊搜索或中文映射
             if key in IMAGE_DATABASE:
@@ -82,8 +88,9 @@ def get_image_list_logic(
                 # 记录一下无效的 key，但不报错
                 logger.warning(f"Key '{key}' not found in IMAGE_DATABASE")
 
-    # 4. 返回简单的列表 (排序以保证确定性)
-    return sorted(list(collected_images))
+    # 4. 返回 JSON 字符串 (解决 Output validation error)
+    final_list = sorted(list(collected_images))
+    return json.dumps(final_list, ensure_ascii=False)
 
 
 # ==========================================
@@ -112,3 +119,12 @@ if __name__ == "__main__":
     print("\n--- 测试 5: 获取7楼公区---")
     # 预期: 所有7楼图片 + lobby 图片
     print(get_image_list_logic(all_public_areas="true"))
+
+    print("\n--- 测试 6: JSON 字符串列表 ---")
+    print(get_image_list_logic(targets='["STE", "1BD"]'))
+
+    print("\n--- 测试 7: 逗号分隔字符串 (之前的报错点) ---")
+    print(get_image_list_logic(targets="lobby,gym,pool"))
+
+    print("\n--- 测试 8: Python 列表 ---")
+    print(get_image_list_logic(targets=["STD", "2BD"]))

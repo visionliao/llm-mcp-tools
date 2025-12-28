@@ -10,11 +10,11 @@ from datetime import datetime
 # ==========================================
 try:
     from .db import get_db_cursor
-    from .param_parser import normalize_list_param, smart_parse_date, fix_gender_misplaced_in_nation
+    from .param_parser import normalize_list_param, smart_parse_date, fix_gender_misplaced_in_nation, sanitize_input
 except ImportError:
     sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     from utils.db import get_db_cursor
-    from utils.param_parser import normalize_list_param, smart_parse_date, fix_gender_misplaced_in_nation
+    from utils.param_parser import normalize_list_param, smart_parse_date, fix_gender_misplaced_in_nation, sanitize_input
 
 logger = logging.getLogger("GuestDetailsLogic")
 
@@ -34,6 +34,21 @@ def get_filtered_details_logic(
         room_type: Optional[Union[str, List[str]]] = None
 ) -> str:
     logger.info(f"执行住客详情查询: Status={status}")
+
+    # 将 "null", "None", "" 字符串清洗为真实的 None
+    name = sanitize_input(name)
+    room_number = sanitize_input(room_number)
+    gender = sanitize_input(gender)
+    status = sanitize_input(status)
+    nation = sanitize_input(nation)
+    min_age = sanitize_input(min_age)
+    max_age = sanitize_input(max_age)
+    min_rent = sanitize_input(min_rent)
+    max_rent = sanitize_input(max_rent)
+    start_arr_date = sanitize_input(start_arr_date)
+    end_arr_date = sanitize_input(end_arr_date)
+    pet = sanitize_input(pet)
+    room_type = sanitize_input(room_type)
 
     # ==========================================
     # 0. 性别、国籍 参数清洗与纠错

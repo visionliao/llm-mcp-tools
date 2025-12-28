@@ -2,15 +2,15 @@ import sys
 import os
 import logging
 from decimal import Decimal
-from typing import Optional, List
+from typing import Optional, List, Union
 
 try:
     from .db import get_db_cursor
-    from .param_parser import normalize_list_param
+    from .param_parser import normalize_list_param, sanitize_input
 except ImportError:
     sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     from utils.db import get_db_cursor
-    from utils.param_parser import normalize_list_param
+    from utils.param_parser import normalize_list_param, sanitize_input
 
 logger = logging.getLogger("ApartmentSearch")
 
@@ -25,13 +25,22 @@ def find_apartments_logic(
     sort_by: str = 'monthly_rent', 
     sort_order: str = 'asc',
     aggregation: Optional[str] = None,
-    limit: int = 10,
-    return_fields: Optional[List[str]] = None
+    limit: int = 10
 ) -> dict:
     """
     房源搜索逻辑。固定使用 rent_12_months 作为价格参考。
     包含状态联查和多样性排序修复。
     """
+
+    # 将 "null", "None", "" 字符串清洗为真实的 None
+    room_number = sanitize_input(room_number)
+    building_no = sanitize_input(building_no)
+    room_code_desc = sanitize_input(room_code_desc)
+    orientation = sanitize_input(orientation)
+    floor_range = sanitize_input(floor_range)
+    area_sqm_range = sanitize_input(area_sqm_range)
+    price_range = sanitize_input(price_range)
+    aggregation = sanitize_input(aggregation)
 
     # 1. 参数清洗
     building_no = normalize_list_param(building_no)
@@ -40,7 +49,6 @@ def find_apartments_logic(
     floor_range = normalize_list_param(floor_range)
     area_sqm_range = normalize_list_param(area_sqm_range)
     price_range = normalize_list_param(price_range)
-    return_fields = normalize_list_param(return_fields)
 
     target_rent_col = 'rent_12_months'
 
@@ -135,19 +143,7 @@ def find_apartments_logic(
         use_diversity_sort = True
     
     # 字段选择
-    if return_fields and len(return_fields) > 0:
-        clean_fields = [f.replace('"', '').replace("'", "") for f in return_fields]
-        field_mapping = {
-            '房号': 'room_number', '楼栋': 'building_no', '楼层': 'floor',
-            '房型': 'room_code_desc', '面积': 'area_sqm', '面积(平方米)': 'area_sqm',
-            '朝向': 'orientation', '参考月租金': target_rent_col
-        }
-        final_fields = [f'rd."{field_mapping.get(f, f)}"' for f in clean_fields]
-        if 'rd."room_number"' not in final_fields:
-            final_fields.append('rd."room_number"')
-        select_cols = ", ".join(final_fields)
-    else:
-        select_cols = f"rd.room_number, rd.building_no, rd.floor, rd.room_code_desc, rd.area_sqm, rd.orientation, rd.{target_rent_col} as monthly_rent"
+    select_cols = f"rd.room_number, rd.building_no, rd.floor, rd.room_code_desc, rd.area_sqm, rd.orientation, rd.{target_rent_col}"
 
     try:
         with get_db_cursor() as cur:
@@ -169,11 +165,6 @@ def find_apartments_logic(
                 # 准备外部排序字段名
                 # 去除 'rd.' 前缀
                 order_col_outer = order_col_inner.replace('rd.', '')
-                
-                # 如果是租金字段，且使用了 monthly_rent 别名，则外部必须用别名
-                # 简单判断：如果 inner 是租金，且 select_cols 里有 monthly_rent
-                if target_rent_col in order_col_inner and "as monthly_rent" in select_cols:
-                    order_col_outer = "monthly_rent"
 
                 sql = f"""
                     WITH Ranked AS (
@@ -310,10 +301,10 @@ if __name__ == "__main__":
     print(res_all_types)
 
 
-    print("\n--- 测试 1: 基础查询 (A栋) ---")
+    print("\n--- 测试 5: 基础查询 (A栋) ---")
     res4 = find_apartments_logic(orientation=['南'], floor_range=[6, 6])
     print(res4)
 
-    print("\n--- 测试 1: 基础查询 (B栋) ---")
-    res4 = find_apartments_logic(building_no="B", floor_range=[8, 8], return_fields=['房号', '朝向'])
+    print("\n--- 测试 6: 基础查询 (B栋) ---")
+    res4 = find_apartments_logic(building_no="B", floor_range=[8, 8])
     print(res4)

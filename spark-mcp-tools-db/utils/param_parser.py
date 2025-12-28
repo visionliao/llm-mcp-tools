@@ -185,3 +185,20 @@ def fix_gender_misplaced_in_nation(nation: Any, gender: Any) -> Tuple[Any, Any]:
             
     # 如果不是性别，原样返回
     return nation, gender
+
+
+def sanitize_input(val: Any) -> Any:
+    """
+    通用清洗函数：将 'null', 'None', '', 'undefined' 等无效字符串强制转换为 Python 的 None。
+    防止 SQL 查询中出现 ILIKE '%null%' 这种错误。
+    """
+    if val is None:
+        return None
+
+    if isinstance(val, str):
+        # 去除首尾空格并转小写进行比对
+        if val.strip().lower() in ('null', 'none', '', 'undefined'):
+            return None
+
+    return val
+
