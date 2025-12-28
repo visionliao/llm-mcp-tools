@@ -21,24 +21,24 @@ IMAGE_DATABASE = {
     "lobby": ["lobby.jpg", "lobby2.jpg"],
 
     # --- 公区 (7楼) ---
-    "bar": ["Bar.jpg"],
+    "bar": ["bar.jpg"],
     "gym": ["gym.jpg"],
-    "ktv": ["KTV.jpg"],
-    "music": ["Music_room.jpg"],
-    "patio": ["Patio.jpg"],
-    "pool": ["POOL01.jpg"],
-    "kitchen": ["Privatekitchen.jpg"],
-    "booth": ["Telephone_booth.jpg"],
-    "yoga": ["Yoga_room.jpg"],
+    "ktv": ["ktv.jpg"],
+    "music": ["music_room.jpg"],
+    "patio": ["patio.jpg"],
+    "pool": ["pool.jpg"],
+    "kitchen": ["privatekitchen.jpg"],
+    "booth": ["telephone_booth.jpg"],
+    "yoga": ["yoga_room.jpg"],
 
     # --- 房型 ---
-    "STD": ["N29_01.jpg", "N29_02.jpg"], # 豪华单间
-    "STE": ["S35_01.jpg", "S35_02.jpg", "S35_03.jpg", "S35_04.jpg"], # 行政单间
-    "1BD": ["N46_01.jpg", "N46_02.jpg", "N46_03.jpg", "N46_04.jpg"], # 一房豪华
-    "1BP": ["N59_01.jpg", "N59_02.jpg", "N59_03.jpg", "N59_04.jpg"], # 一房行政
-    "STP": ["S50_01.jpg", "S50_02.jpg", "S50_03.jpg"], # 行政豪华单间
-    "2BD": ["S74_01.jpg", "S74_02.jpg", "S74_03.jpg", "S74_04.jpg", "S74_05.jpg"], # 两房 (共用 S74)
-    "3BR": ["S74_01.jpg", "S74_02.jpg", "S74_03.jpg", "S74_04.jpg", "S74_05.jpg"], # 三房 (共用 S74)
+    "STD": ["n29_01.jpg", "n29_02.jpg"], # 豪华单间
+    "STE": ["s35_01.jpg", "s35_02.jpg", "s35_03.jpg", "s35_04.jpg"], # 行政单间
+    "1BD": ["n46_01.jpg", "n46_02.jpg", "n46_03.jpg", "n46_04.jpg"], # 一房豪华
+    "1BP": ["n59_01.jpg", "n59_02.jpg", "n59_03.jpg", "n59_04.jpg"], # 一房行政
+    "STP": ["s50_01.jpg", "s50_02.jpg", "s50_03.jpg"], # 行政豪华单间
+    "2BD": ["s74_01.jpg", "s74_02.jpg", "s74_03.jpg", "s74_04.jpg", "s74_05.jpg"], # 两房 (共用 S74)
+    "3BR": ["s74_01.jpg", "s74_02.jpg", "s74_03.jpg", "s74_04.jpg", "s74_05.jpg"], # 三房 (共用 S74)
 }
 
 # 定义哪些 Key 属于“所有7楼公区”
