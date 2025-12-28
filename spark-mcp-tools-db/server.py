@@ -18,6 +18,7 @@ from utils.nearby import nearby_report_logic
 from utils.apartment_search import find_apartments_logic
 from utils.daily_occupancy import analyze_occupancy_logic
 from utils.geo_navigation import plan_route_logic
+from utils.image_finder import get_image_list_logic
 
 load_dotenv()
 # ==========================================
@@ -1178,6 +1179,35 @@ def plan_route_between(
     """
     return plan_route_logic(origin, destination, mode=mode)
 
+
+@mcp.tool()
+def spark_show_image(
+    targets: Optional[Union[str, List[str]]] = None,
+    all_public_areas: Optional[str] = None
+) -> str:
+    """
+    功能描述 (description):
+    获取公寓各个区域或房型的展示图片名称列表。
+
+    输入参数 (parameters):
+      targets (Union[str, List[str]]): 指定要查询的区域或房型关键词。支持单个字符串或列表。
+        支持的关键词及对应含义：
+        [公共区域]
+        - 公共区域: 'lobby'(大厅), 'bar'(酒吧), 'gym'(健身房), 'ktv', 'music'(音乐室),
+                   'patio'(连接桥/走廊), 'pool'(游泳池), 'kitchen'(私享厨房),
+                   'booth'(单人办公间), 'yoga'(瑜伽房)
+        - 房型代码: 'STD'(豪华单间), 'STE'(行政单间), '1BD'(一房豪华式公寓),
+                   '1BP'(一房行政豪华式公寓), 'STP'(行政豪华单间), '2BD'(两房豪华式公寓), '3BR'(三房式公寓)
+
+      all_public_areas (str): 是否获取所有7楼公共区域的图片。
+        - 默认为 None。
+        - 如果设置为 "true" 或 "yes"，则返回所有公区（健身房、泳池等）的图片列表。
+        - 适用场景：用户询问“你们有哪些公区设施？”或者“给我看看所有公区的照片”。
+
+    返回结果 (returns):
+      图片文件名列表。例如: ['gym.jpg', 'POOL01.jpg']
+    """
+    return get_image_list_logic(targets=targets, all_public_areas=all_public_areas)
 
 
 
