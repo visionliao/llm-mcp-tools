@@ -1,0 +1,15 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/venv
+/out/
+# production
+/build
+# env files (can opt-in for committing if needed)
+.env*
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+
