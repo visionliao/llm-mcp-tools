@@ -50,7 +50,7 @@ PUBLIC_AREAS_7F = [
 def get_image_list_logic(
     targets: Optional[Union[str, List[str]]] = None,
     all_public_areas: Optional[str] = None
-) -> List[str]:
+) -> str:
     """
     根据参数返回图片文件名列表。
     """
