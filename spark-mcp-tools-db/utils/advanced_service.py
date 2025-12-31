@@ -16,12 +16,31 @@ logger = logging.getLogger("WorkOrderLogic")
 
 DETAIL_THRESHOLD = 10
 
+def _map_status_code(code: str) -> Optional[str]:
+    """
+    将简写代码映射为数据库中的中文字符串。
+    自动转换为大写进行匹配。
+    """
+    if not code:
+        return None
+
+    mapping = {
+        'C': '已完成',
+        'c': '已完成',
+        'U': '待处理',
+        'u': '待处理',
+        'X': '已取消',
+        'x': '已取消'
+    }
+    return mapping.get(code.strip().upper(), None)
+
 def search_work_orders_logic(
         start_date_str: Optional[str] = None,
         end_date_str: Optional[str] = None,
         room_number: Optional[str] = None,
         service_code: Optional[str] = None,
-        location_code: Optional[str] = None
+        location_code: Optional[str] = None,
+        status_code: Optional[str] = None
 ) -> str:
     """
     通用工单查询与分析逻辑。
@@ -91,6 +110,16 @@ def search_work_orders_logic(
                 params.append(target_loc_name)
                 params.append(target_loc_name)
                 criteria_desc_parts.append(f"位置[{target_loc_name}]")
+
+            # 工单状态
+            db_status = _map_status_code(status_code)
+            if db_status:
+                conditions.append("status = %s")
+                params.append(db_status)
+                criteria_desc_parts.append(f"状态[{db_status}]")
+            elif status_code:
+                # 只有当用户输入了非空值但无法解析时才报错
+                return f"输入错误：无效的状态代码 '{status_code}'。请使用 C(已完成), U(未完成), X(已取消)。"
 
             where_clause = " AND ".join(conditions)
             criteria_str = ", ".join(criteria_desc_parts) if criteria_desc_parts else "全量查询"
@@ -292,4 +321,9 @@ if __name__ == "__main__":
     print("\n--- 测试: 用代码 004 (厨房) ---")
     print(search_work_orders_logic(start_date_str="2025-08-01", end_date_str="2025-08-31", location_code="004"))
 
+    # 场景3:
+    print("--- 测试: 查询指定时间段未完成的工单 ---")
+    print(search_work_orders_logic(start_date_str="2025-11-01", end_date_str="2025-11-30", status_code='U'))
+
+    print("--- 测试: 所有 ---")
     print(search_work_orders_logic())

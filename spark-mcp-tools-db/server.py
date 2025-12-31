@@ -493,7 +493,8 @@ def query_orders(
         end_date_str: Optional[str] = None,
         room_number: Optional[str] = None,
         service_code: Optional[str] = None,
-        location_code: Optional[str] = None
+        location_code: Optional[str] = None,
+        status_code: Optional[str] = None
 ) -> str:
     """
     功能描述 (description):
@@ -506,6 +507,10 @@ def query_orders(
     room_number (Optional[str]):    房间号，支持单个或多个 (如 "A1001" 或 "A1001, B205")。默认为None(不限)。
     service_code (Optional[str]):   服务项目代码 (例如 'B501' 代表电源插座)。默认为None (不限)。
     location_code (Optional[str]):  具体位置代码 (例如 '004' 代表厨房)。默认为None (不限)。
+    status_code (Optional[str]):    工单状态代码，默认为None (不限)，可选值：
+        - 'C' : 已完成 (Completed)
+        - 'U' : 未完成 (Unfinished)
+        - 'X' : 已取消 (Cancelled)
 
     参数代码对照表：
     [1. 服务项目代码 (service_code)]
@@ -568,7 +573,7 @@ def query_orders(
     '''
     """
     return search_work_orders_logic(
-        start_date_str, end_date_str, room_number, service_code, location_code
+        start_date_str, end_date_str, room_number, service_code, location_code, status_code
     )
 
 
@@ -636,7 +641,7 @@ def spark_show_image(
         - 适用场景：用户询问“你们有哪些公区设施？”或者“给我看看所有公区的照片”。
 
     返回结果 (returns):
-      图片文件名列表。例如: ['gym.jpg', 'POOL01.jpg']
+      图片文件名列表。例如: ['gym.jpg', 'lobby.jpg']
     """
     return get_image_list_logic(targets=targets, all_public_areas=all_public_areas)
 
